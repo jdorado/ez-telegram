@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "services": {
+    "telegram": {
+      "buildTarget": "runtime",
+      "volumes": {"profile": "/state/telegram", "ipc": "/plugins/telegram"},
+      "command": ["node", "/app/bin/ez-telegram.mjs", "serve"],
+      "environment": {"EZ_TELEGRAM_SERVICE": "1"},
+      "healthcheck": ["node", "/app/bin/ez-telegram.mjs", "health"],
+      "memoryMiB": 128
+    }
+  },
+  "commands": {"telegram": {"service": "telegram", "argv": ["node", "/app/bin/ez-telegram.mjs"]}}
+}

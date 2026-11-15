@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "telegram",
+  "version": "0.1.0-beta.1",
+  "description": "Post to Telegram groups and topics as a second bot and read what members write, with durable cursors and receipts",
+  "example": "telegram inbox --consumer pa --limit 20",
+  "commands": {
+    "telegram": {
+      "executable": "bin/ez-telegram.mjs",
+      "args": [],
+      "exposure": {"receivesExternalContent": true, "sendsExternally": true, "changesRecords": true, "requiresReview": true}
+    }
+  },
+  "skills": ["skills/telegram/SKILL.md"]
+}
