@@ -2,12 +2,13 @@
 
 A Telegram group channel for Ez agents. It gives an agent a **second** bot, apart
 from the agent's own Telegram chat, to post in a group (or a forum topic per
-subject) and to read what members write. It is the Telegram counterpart of
+subject) and to read what members write. Connected to the agent as an Ez
+application channel, a message in a group wakes the agent at once. It is the Telegram counterpart of
 ez-twilio and ez-whatsapp: a managed container long-polls Telegram, keeps a
 private journal, and the agent works through one CLI.
 
 Not here: running models, replies without the agent, business workflows, private
-chats, channels, files or voice. No content becomes an instruction.
+chats, channels, files or voice.
 
 ## Set up the bot and the group
 
@@ -50,12 +51,33 @@ receipts), `rejected` means nothing was posted, exit 5 `uncertain` means inspect
 `operation` and the chat before anything else. `--help` is the argument contract and
 `skills/telegram/SKILL.md` the agent's guide.
 
+## Wake the agent (Ez application channel)
+
+Like ez-slack, the plugin can be bound to the agent as an Ez application channel.
+The operator registers a binding inside the relay (`ezenciel-agents-application --id
+telegram --token-file /private/token`), puts the plugin and the relay's application
+listener on one private network (the agent's host-executor network binding pins the
+inspected plugin revision), and passes the binding privately:
+
+```sh
+ez telegram connect < /private/ez-connection.json   # {"url":"http://relay:8787","token":"...","privateHttp":true}
+```
+
+From then on every human message in a group the bot is in starts an ordinary run of
+the agent at once (messages captured before `connect` are not replayed). Each forum
+topic is its own scope (`telegram:CHAT:TOPIC`, or `telegram:CHAT:main`), so its own
+continuing conversation. Whatever the agent sends in that run is posted back into the
+topic as a reply to the message, once per message key. **Adding the bot to a group
+trusts every member there with the agent's owner authority**: use dedicated groups
+and add the bot only where that is intended. `status` shows `channel` progress
+(admitted cursor, open runs, last pass).
+
 ## Limits
 
 - One profile serves one bot; a different bot needs a separate profile.
 - Telegram keeps an unconfirmed update for 24 hours; the journal keeps what the poller
-  confirmed. There is no history import, backup export or wake event yet: the agent
-  reads `inbox` on its own schedule.
+  confirmed. There is no history import or backup export. Without `connect` the agent reads
+  `inbox` on its own schedule.
 - Groups and supergroups only. A group that migrates to a supergroup continues under a
   new id (`chats` shows `migratedTo`).
 

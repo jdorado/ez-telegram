@@ -5,12 +5,13 @@ import {DatabaseSync} from 'node:sqlite';
 import {Store} from './store.mjs';
 import {Transport} from './transport.mjs';
 import {Provider} from './provider.mjs';
+import {Channel, core} from './channel.mjs';
 import {config, integer, key, chatId} from './validation.mjs';
 import {fail, publicError} from './errors.mjs';
 
 export async function serve(options = {}) {
   const directory = options.directory ?? '/state/telegram', socketPath = options.socketPath ?? '/plugins/telegram/service.sock';
-  const connectionFile = join(directory, 'connection.json');
+  const connectionFile = join(directory, 'connection.json'), coreFile = join(directory, 'core.json');
   await mkdir(directory, {recursive: true, mode: 0o700});
   // A held SQLite lock is released by the OS when the container dies, so no stale lock file exists.
   const writer = new DatabaseSync(join(directory, '.writer.sqlite'), {timeout: 0});
@@ -35,6 +36,22 @@ export async function serve(options = {}) {
     } catch (error) {
       if (error.code !== 'ENOENT') throw error.exitCode ? error : fail('CORRUPT_STATE', 'Configuration is unreadable; preserve it and investigate');
     }
+    let channel = null;
+    const makeChannel = connection => new Channel(store, connection, {fetch: options.fetch});
+    try { channel = makeChannel(core(JSON.parse(await readFile(coreFile, 'utf8')))); }
+    catch (error) { if (error.code !== 'ENOENT') throw error.exitCode ? error : fail('CORRUPT_STATE', 'Ez connection is unreadable; preserve it and investigate'); }
+    // Admit new messages to Ez and post the agent's replies, every couple of seconds.
+    async function pump() {
+      while (!closed) {
+        if (channel && transport && !initializing) {
+          try {
+            const admitted = await channel.admit(), posted = await channel.deliver(args => transport.send(args));
+            store.setMeta('channelPass', {at: new Date(now()).toISOString(), error: null, admitted, posted});
+          } catch (error) { if (!closed) store.setMeta('channelPass', {at: new Date(now()).toISOString(), error: publicError(error).code}); }
+        }
+        await sleep(options.channelMs ?? 2000);
+      }
+    }
     const required = () => { if (!transport) throw fail('NOT_CONFIGURED', 'Initialize the plugin privately before provider operations', 3); return transport; };
     async function run() {
       let errors = 0;
@@ -52,7 +69,7 @@ export async function serve(options = {}) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw fail('INVALID_INPUT', 'Expected command arguments');
       if (initializing && !['health', 'status', 'inbox', 'operation'].includes(command)) throw fail('BUSY', 'Configuration is being updated');
       if (command === 'health') return {service: 'ready'};
-      if (command === 'status') return {configured: Boolean(transport), ...store.status()};
+      if (command === 'status') return {configured: Boolean(transport), channelConnected: Boolean(channel), ...store.status()};
       if (command === 'init') {
         initializing = true; abort.abort(); await inflight?.catch(() => {});
         try {
@@ -67,6 +84,15 @@ export async function serve(options = {}) {
           transport = make(connection);
           return {configured: true, bot: identity};
         } finally { abort = new AbortController(); initializing = false; }
+      }
+      if (command === 'connect') {
+        const connection = core(args.configuration), candidate = makeChannel(connection);
+        const registration = await candidate.registration();
+        // Start at the current head: messages captured before the channel was connected are not replayed.
+        if (store.meta('admitted') === null) store.setMeta('admitted', store.head());
+        await atomicPrivate(coreFile, connection);
+        channel = candidate;
+        return {connected: true, bindingId: registration.bindingId ?? null, admitted: store.meta('admitted')};
       }
       if (command === 'inbox') {
         const consumer = args.consumer === undefined ? undefined : key(args.consumer);
@@ -111,7 +137,7 @@ export async function serve(options = {}) {
     await unlink(socketPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
     await chmod(socketPath, 0o600);
-    loop = run();
+    loop = Promise.all([run(), pump()]);
     return {store, call, socketPath, close: async () => {
       if (closed) return;
       closed = true; abort.abort();

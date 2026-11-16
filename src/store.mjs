@@ -22,7 +22,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS chat (id TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS event (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, chat TEXT NOT NULL, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS operation (key TEXT PRIMARY KEY, value TEXT NOT NULL, digest TEXT NOT NULL, state TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS consumer (id TEXT PRIMARY KEY, cursor INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS consumer (id TEXT PRIMARY KEY, cursor INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS run (id TEXT PRIMARY KEY, value TEXT NOT NULL, closed TEXT);`);
     if (this.db.prepare('PRAGMA quick_check').get().quick_check !== 'ok') throw fail('CORRUPT_STATE', 'Database integrity check failed');
     if (!this.meta('schema')) this.setMeta('schema', 1);
     if (this.meta('schema') !== 1) throw fail('CORRUPT_STATE', 'Unsupported state schema');
@@ -92,9 +93,17 @@ export class Store {
     });
   }
   saveOperation(operation) { this.db.prepare('UPDATE operation SET value=?,state=? WHERE key=?').run(json(operation), operation.state, operation.key); }
+  // Ez runs this channel admitted; open until their result is posted.
+  openRun(record) { this.db.prepare('INSERT INTO run VALUES (?,?,NULL) ON CONFLICT(id) DO NOTHING').run(record.runId, json(record)); }
+  openRuns() { return this.db.prepare('SELECT value FROM run WHERE closed IS NULL ORDER BY rowid').all().map(read); }
+  saveRun(record) { this.db.prepare('UPDATE run SET value=? WHERE id=?').run(json(record), record.runId); }
+  closeRun(id, state) { this.db.prepare('UPDATE run SET closed=? WHERE id=?').run(state, id); }
   status() {
     const states = Object.fromEntries(this.db.prepare('SELECT state,count(*) AS n FROM operation GROUP BY state').all().map(row => [row.state, Number(row.n)]));
     return {head: this.head(), binding: this.meta('binding'), offset: this.meta('offset'), lastPoll: this.meta('lastPoll'),
-      chatCount: Number(this.db.prepare('SELECT count(*) AS n FROM chat').get().n), operations: states};
+      chatCount: Number(this.db.prepare('SELECT count(*) AS n FROM chat').get().n), operations: states,
+      channel: {admitted: this.meta('admitted'), openRuns: Number(this.db.prepare('SELECT count(*) AS n FROM run WHERE closed IS NULL').get().n),
+        runs: Object.fromEntries(this.db.prepare('SELECT closed,count(*) AS n FROM run WHERE closed IS NOT NULL GROUP BY closed').all().map(row => [row.closed, Number(row.n)])),
+        lastPass: this.meta('channelPass')}};
   }
 }

@@ -45,5 +45,12 @@ within 48 hours of posting. Its key and outcomes read like `send`.
 Enabling Topics turns a group into a supergroup with a new id; `chats` shows the
 old entry's `migratedTo` and sends to the old id are refused.
 
+When the operator has connected the plugin as an Ez application channel, a human
+message in a group the bot is in starts a run of yours at once, one conversation
+per forum topic; the run text names the group, topic, message id and sender.
+What you send in that run (`ezenciel-agents-message`) is posted back into that
+topic as a reply. Answer there only what the group may see; the members are the
+people the owner chose to add the bot for.
+
 The plugin holds Telegram mechanics and receipts only. Whom to post to, what to
 say and what a reply means stay with the agent.

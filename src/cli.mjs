@@ -12,7 +12,7 @@ export async function main(argv, options = {}) {
   const jsonIndex = args.indexOf('--json'); if (jsonIndex !== -1) args.splice(jsonIndex, 1);
   const [command, ...rest] = args;
   if (!command || command === '--help') return {commands: [
-    'init < private-connection.json', 'doctor', 'status', 'chats',
+    'init < private-connection.json', 'connect < private-ez-connection.json', 'doctor', 'status', 'chats',
     'inbox [--after CURSOR | --consumer NAME] [--chat CHAT_ID] [--limit 1..100]', 'acknowledge --consumer NAME --cursor CURSOR',
     'send --chat CHAT_ID (--text TEXT | --text-stdin) --key KEY [--topic TOPIC_ID] [--reply-to MESSAGE_ID] [--html] [--preview]',
     'topic create --chat CHAT_ID --name NAME --key KEY [--preview]',
@@ -25,6 +25,7 @@ export async function main(argv, options = {}) {
     topic: 'create makes a forum topic in a group that has Topics enabled and where the bot may manage topics; returns the operation with providerTopicId, which is the --topic of later sends. The key makes it once: read it back with operation --key KEY.',
     pin: 'Pins one message at the top of its chat, or of its forum topic when it was posted in one. --send-key names a message this bot posted (an accepted send); --message names any message id in --chat. Silent unless --notify. The bot needs the Pin messages admin right (doctor shows canPinMessages). Returns the operation {key,state,chat,messageId,pinned}; the key pins once, and its outcomes read like send.',
     delete: 'Deletes one message for everyone, named like pin. The bot may delete its own posts, and any message with the Delete messages admin right (doctor shows canDeleteMessages); Telegram allows it only within 48 hours of posting. Returns the operation {key,state,chat,messageId,deleted}; the key deletes once, and its outcomes read like send.',
+    connect: 'Operator setup: binds the plugin to the agent as an Ez application channel ({"url","token","privateHttp"} on stdin, from ezenciel-agents-application). From then on every human message in a group the bot is in starts a run of the agent at once, one conversation per forum topic (scope telegram:CHAT:TOPIC or telegram:CHAT:main); whatever the agent sends in that run is posted back into the topic as a reply to the message. Adding the bot to a group trusts its members with the agent: use dedicated groups. status shows channel progress.',
     transport: 'One managed Docker service long-polls Telegram and keeps a private journal. Telegram holds an unconfirmed update for up to 24 hours. Keep the operation key after uncertainty.',
     exitCodes: {0: 'ok', 1: 'internal', 2: 'invalid input or provider error', 3: 'auth/account', 4: 'refused', 5: 'uncertain send or service response'}};
   if (command === '--version' && !rest.length) return {version: pkg.version};
@@ -36,7 +37,7 @@ export async function main(argv, options = {}) {
     return undefined;
   }
   let name = command, values = {};
-  if (command === 'init' && !rest.length) values.configuration = await stdinJSON(options.stdin ?? process.stdin);
+  if (['init', 'connect'].includes(command) && !rest.length) values.configuration = await stdinJSON(options.stdin ?? process.stdin);
   else if (['doctor', 'status', 'health', 'chats'].includes(command) && !rest.length) { /* no arguments */ }
   else if (command === 'inbox') values = flags(rest, {after: 'number', consumer: 'string', chat: 'string', limit: 'number'});
   else if (command === 'acknowledge') values = flags(rest, {consumer: 'string', cursor: 'number'});
