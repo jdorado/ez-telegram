@@ -1,7 +1,7 @@
 import {Provider} from './provider.mjs';
 import {interpret} from './capture.mjs';
 import {fail, publicError} from './errors.mjs';
-import {sendInput, topicInput} from './validation.mjs';
+import {sendInput, topicInput, pinInput} from './validation.mjs';
 import {hash} from './store.mjs';
 
 export class Transport {
@@ -31,7 +31,7 @@ export class Transport {
     }
   }
   chats() { return {chats: this.store.chats()}; }
-  // Both writes share one contract: reserve the key, call Telegram, record what came back.
+  // Every write shares one contract: reserve the key, call Telegram, record what came back.
   async act(payload, record, args, call, accept) {
     if (args.preview === true) return {preview: true, payload};
     const chat = this.store.chat(payload.chat);
@@ -66,6 +66,13 @@ export class Transport {
       return {providerTopicId: response.message_thread_id};
     });
   }
+  async pin(args) {
+    const payload = pinInput(args, key => this.store.operation(key));
+    return this.act(payload, {...payload, pinned: false}, args, () => this.provider.pin(payload), response => {
+      if (response !== true) throw fail('PROVIDER_RESPONSE', 'Telegram did not confirm the pin', 5);
+      return {pinned: true};
+    });
+  }
   // Read-only: what Telegram says about the bot and the chats it has seen.
   async doctor() {
     const me = await this.provider.me(), webhook = await this.provider.webhook();
@@ -73,7 +80,8 @@ export class Transport {
     const chats = await Promise.all(known.map(async chat => {
       const member = await this.provider.member(chat.id, me.id).catch(() => null);
       return {id: chat.id, type: chat.type, title: chat.title, isForum: chat.isForum, botStatus: member?.status === 'creator' ? 'administrator' : member?.status ?? chat.botStatus,
-        ...(member ? {canManageTopics: member.status === 'creator' ? true : member.can_manage_topics ?? false} : {})};
+        ...(member ? {canManageTopics: member.status === 'creator' ? true : member.can_manage_topics ?? false,
+          canPinMessages: member.status === 'creator' ? true : member.can_pin_messages ?? false} : {})};
     }));
     const warnings = [];
     if (webhook?.url) warnings.push('WEBHOOK_ACTIVE: this bot has a webhook, so polling fails; use a bot nobody else serves');

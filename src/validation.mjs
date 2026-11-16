@@ -31,3 +31,18 @@ export function topicInput(args) {
   if (typeof name !== 'string' || !name.trim() || name.length > 128 || /[\u0000-\u001f\ud800-\udfff]/u.test(name)) throw fail('INVALID_INPUT', 'Topic name must be 1..128 printable characters');
   return {kind: 'topic', key: key(args.key), chat: chatId(args.chat), name};
 }
+export function pinInput(args, sent) {
+  const chat = args.chat === undefined ? undefined : chatId(args.chat);
+  let message;
+  if ((args['send-key'] === undefined) === (args.message === undefined)) throw fail('INVALID_INPUT', 'Name the message with --send-key or --message');
+  if (args.message !== undefined) {
+    if (chat === undefined) throw fail('INVALID_INPUT', 'Give --chat with --message');
+    message = {chat, messageId: messageNumber(args.message, 'message id')};
+  } else {
+    const operation = sent(key(args['send-key']));
+    if (operation?.kind !== 'send' || operation.state !== 'accepted') throw fail('NOT_FOUND', 'No accepted send under that key; read operation --key', 4);
+    if (chat !== undefined && chat !== operation.chat) throw fail('INVALID_INPUT', 'That send was posted in a different chat');
+    message = {chat: operation.chat, messageId: operation.providerMessageId};
+  }
+  return {kind: 'pin', key: key(args.key), ...message, notify: args.notify === true};
+}
