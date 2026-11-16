@@ -33,6 +33,11 @@ export function topicInput(args) {
   if (typeof name !== 'string' || !name.trim() || name.length > 128 || /[\u0000-\u001f\ud800-\udfff]/u.test(name)) throw fail('INVALID_INPUT', 'Topic name must be 1..128 printable characters');
   return {kind: 'topic', key: key(args.key), chat: chatId(args.chat), name};
 }
+// A new name for a topic the bot may manage; each new name is its own intent and key.
+export function topicRenameInput(args) {
+  const {name} = topicInput(args);
+  return {kind: 'topic-rename', key: key(args.key), chat: chatId(args.chat), topic: messageNumber(args.topic, 'topic id'), name};
+}
 // A message is named by the send key the bot posted it under, or by its chat and id.
 function target(args, sent) {
   const chat = args.chat === undefined ? undefined : chatId(args.chat);

@@ -49,7 +49,7 @@ async function telegram(t, {canRead = true} = {}) {
     }
     if (method === 'getChatMember') return ok(state.members[input.chat_id] ?? {status: 'member'});
     if (method === 'sendMessage') return ok({message_id: state.next++, chat: {id: Number(input.chat_id)}});
-    if (method === 'pinChatMessage' || method === 'deleteMessage') return ok(true);
+    if (method === 'pinChatMessage' || method === 'deleteMessage' || method === 'editForumTopic') return ok(true);
     if (method === 'getFile') return ok({file_id: input.file_id, file_path: `files/${input.file_id}`});
     if (method === 'sendVoice') return ok({message_id: state.next++, chat: {id: Number(input.chat_id)}, voice: {file_id: 'v'}});
     if (method === 'createForumTopic') return ok({message_thread_id: 900 + state.requests.filter(r => r.method === method).length, name: input.name});
@@ -156,6 +156,23 @@ test('topic create makes one topic per key', async t => {
   assert.deepEqual(await transport.topic({chat: '-1001', name: '12 Example Street', key: 'pa-thread-1'}), topic);
   assert.equal(api.requests.filter(request => request.method === 'createForumTopic').length, 1);
   assert.equal((await transport.send({chat: '-1001', text: 'in topic', key: 'k', topic: topic.providerTopicId})).state, 'accepted');
+});
+
+test('topic rename gives a topic a new name once per key', async t => {
+  const {api, transport} = await fixture(t);
+  await known(api, transport, message('hello'));
+  const args = {chat: '-1001', topic: 901, name: '🔴 Today 2pm · 12 Example Street', key: 'name-1'};
+  assert.deepEqual(await transport.topicRename({...args, preview: true}),
+    {preview: true, payload: {kind: 'topic-rename', key: 'name-1', chat: '-1001', topic: 901, name: args.name}});
+  const renamed = await transport.topicRename(args);
+  assert.deepEqual([renamed.state, renamed.renamed, renamed.name], ['accepted', true, args.name]);
+  assert.deepEqual(await transport.topicRename(args), renamed);
+  assert.deepEqual(api.requests.filter(request => request.method === 'editForumTopic').map(request => request.input),
+    [{chat_id: '-1001', message_thread_id: 901, name: args.name}]);
+  await assert.rejects(transport.topicRename({...args, key: 'name-2', topic: undefined}), {code: 'INVALID_INPUT'});
+  await assert.rejects(transport.topicRename({...args, key: 'name-2', name: ''}), {code: 'INVALID_INPUT'});
+  api.failure = {method: 'editForumTopic', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: TOPIC_NOT_MODIFIED'}};
+  assert.equal((await transport.topicRename({...args, key: 'name-3'})).state, 'rejected');
 });
 
 test('pin pins a sent message once per key, silently by default', async t => {
