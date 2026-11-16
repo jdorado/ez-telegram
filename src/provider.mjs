@@ -49,4 +49,6 @@ export class Provider {
       ...(topic ? {message_thread_id: topic} : {}), ...(replyTo ? {reply_parameters: {message_id: replyTo, allow_sending_without_reply: true}} : {})});
   }
   createTopic({chat, name}) { return this.call('createForumTopic', {chat_id: chat, name}); }
+  // A message in a forum topic is pinned at the top of that topic.
+  pin({chat, messageId, notify}) { return this.call('pinChatMessage', {chat_id: chat, message_id: messageId, disable_notification: !notify}); }
 }

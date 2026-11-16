@@ -44,6 +44,7 @@ async function telegram(t, {canRead = true} = {}) {
     }
     if (method === 'getChatMember') return ok(state.members[input.chat_id] ?? {status: 'member'});
     if (method === 'sendMessage') return ok({message_id: state.next++, chat: {id: Number(input.chat_id)}});
+    if (method === 'pinChatMessage') return ok(true);
     if (method === 'createForumTopic') return ok({message_thread_id: 900 + state.requests.filter(r => r.method === method).length, name: input.name});
     return reply(404, {ok: false, error_code: 404, description: 'Not Found'});
   });
@@ -147,6 +148,27 @@ test('topic create makes one topic per key', async t => {
   assert.equal((await transport.send({chat: '-1001', text: 'in topic', key: 'k', topic: topic.providerTopicId})).state, 'accepted');
 });
 
+test('pin pins a sent message once per key, silently by default', async t => {
+  const {api, transport} = await fixture(t);
+  await known(api, transport, message('hello'));
+  const pins = () => api.requests.filter(request => request.method === 'pinChatMessage');
+  const sent = await transport.send({chat: '-1001', text: 'Dossier', key: 'dossier-1', topic: 7});
+  assert.deepEqual(await transport.pin({'send-key': 'dossier-1', key: 'pin-1', preview: true}),
+    {preview: true, payload: {kind: 'pin', key: 'pin-1', chat: '-1001', messageId: sent.providerMessageId, notify: false}});
+  const pin = await transport.pin({'send-key': 'dossier-1', key: 'pin-1'});
+  assert.deepEqual([pin.state, pin.pinned, pin.messageId], ['accepted', true, sent.providerMessageId]);
+  assert.deepEqual(pins()[0].input, {chat_id: '-1001', message_id: sent.providerMessageId, disable_notification: true});
+  assert.deepEqual(await transport.pin({chat: '-1001', message: sent.providerMessageId, key: 'pin-1'}), pin);
+  assert.equal(pins().length, 1);
+  assert.equal((await transport.pin({chat: '-1001', message: 55, key: 'pin-2', notify: true})).state, 'accepted');
+  assert.equal(pins()[1].input.disable_notification, false);
+  await assert.rejects(transport.pin({'send-key': 'missing', key: 'pin-3'}), {code: 'NOT_FOUND', exitCode: 4});
+  await assert.rejects(transport.pin({'send-key': 'dossier-1', chat: '-999', key: 'pin-3'}), {code: 'INVALID_INPUT'});
+  await assert.rejects(transport.pin({message: 55, key: 'pin-3'}), {code: 'INVALID_INPUT'});
+  api.failure = {method: 'pinChatMessage', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: not enough rights to manage pinned messages in the chat'}};
+  assert.equal((await transport.pin({chat: '-1001', message: 56, key: 'pin-4'})).state, 'rejected');
+});
+
 test('a consumer reads after its acknowledged cursor, never backward or ahead', async t => {
   const api = await telegram(t);
   const directory = await mkdtemp(join(tmpdir(), 'ez-telegram-cur-'));
@@ -176,7 +198,7 @@ test('doctor reads the bot and warns about privacy mode and a webhook', async t 
   assert.equal(report.warnings.length, 2);
   api.webhook = ''; api.members['-1001'] = {status: 'administrator', can_manage_topics: true};
   const fixed = await transport.doctor();
-  assert.deepEqual([fixed.warnings, fixed.chats[0].canManageTopics], [[], true]);
+  assert.deepEqual([fixed.warnings, fixed.chats[0].canManageTopics, fixed.chats[0].canPinMessages], [[], true, false]);
   assert.equal(api.requests.every(request => ['getMe', 'getWebhookInfo', 'getUpdates', 'getChatMember'].includes(request.method)), true);
 });
 
@@ -197,6 +219,9 @@ test('the service answers the CLI and never shows the token', async t => {
   assert.equal((await run(['send', '--chat', '-1001', '--text-stdin', '--key', 'm1'], 'line one\nline two\n')).state, 'accepted');
   assert.equal(api.sent()[0].input.text, 'line one\nline two');
   assert.deepEqual((await run(['topic', 'create', '--chat', '-1001', '--name', 'Owner follow-up', '--key', 't1'])).providerTopicId, 901);
+  assert.equal((await run(['pin', '--send-key', 'm1', '--key', 'p1'])).pinned, true);
+  api.failure = {method: 'pinChatMessage', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: message to pin not found'}};
+  await assert.rejects(run(['pin', '--chat', '-1001', '--message', '9', '--key', 'p2']), {code: 'SEND_REJECTED', exitCode: 4});
   api.failure = {method: 'sendMessage', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: chat not found'}};
   await assert.rejects(run(['send', '--chat', '-1001', '--text', 'x', '--key', 'm2']),
     error => error.code === 'SEND_REJECTED' && error.exitCode === 4 && error.details.providerCode === 400 && error.details.reason === 'PROVIDER_REJECTED');

@@ -32,6 +32,10 @@ key to hide it.
 
 One thread per subject: `topic create --chat ID --name NAME --key KEY` makes a forum
 topic once; `operation --key KEY` returns its `providerTopicId` for later sends.
+`pin --send-key SEND_KEY --key KEY` pins a message the bot posted at the top of its
+topic (or of the group when it has no topic); `--chat ID --message ID` pins any message.
+It is silent unless `--notify`, needs the bot's Pin messages admin right (`doctor`
+shows `canPinMessages`), and its key and outcomes read like `send`.
 Enabling Topics turns a group into a supergroup with a new id; `chats` shows the
 old entry's `migratedTo` and sends to the old id are refused.
 
