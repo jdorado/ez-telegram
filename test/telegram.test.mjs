@@ -115,6 +115,9 @@ test('send posts once per key and keeps no text', async t => {
   await assert.rejects(transport.send({...args, text: 'different'}), {code: 'KEY_CONFLICT', exitCode: 4});
   await assert.rejects(transport.send({...args, chat: '-999', key: 'other'}), {code: 'CHAT_UNKNOWN'});
   assert.equal(JSON.stringify(store.operation('pa-thread-1')).includes('reach the owner'), false);
+  const bold = await transport.send({chat: '-1001', text: '<b>CALL 555 · CODE 12</b>', key: 'bold-1', html: true});
+  assert.deepEqual([bold.state, bold.html, api.sent().at(-1).input.parse_mode], ['accepted', true, 'HTML']);
+  await assert.rejects(transport.send({chat: '-1001', text: '<b>CALL 555 · CODE 12</b>', key: 'bold-1'}), {code: 'KEY_CONFLICT'});
 });
 
 test('a refused send may be tried again; an unanswered one stays uncertain', async t => {
@@ -233,6 +236,7 @@ test('the service answers the CLI and never shows the token', async t => {
   await until(async () => (await run(['chats'])).chats.length === 1);
   assert.equal((await run(['send', '--chat', '-1001', '--text-stdin', '--key', 'm1'], 'line one\nline two\n')).state, 'accepted');
   assert.equal(api.sent()[0].input.text, 'line one\nline two');
+  assert.equal((await run(['send', '--chat', '-1001', '--text', '<b>x</b>', '--html', '--key', 'h1'])).html, true);
   assert.deepEqual((await run(['topic', 'create', '--chat', '-1001', '--name', 'Owner follow-up', '--key', 't1'])).providerTopicId, 901);
   assert.equal((await run(['pin', '--send-key', 'm1', '--key', 'p1'])).pinned, true);
   api.failure = {method: 'pinChatMessage', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: message to pin not found'}};
