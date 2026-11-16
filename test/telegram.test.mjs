@@ -258,7 +258,7 @@ test('a group message starts an agent run per topic and the reply is posted back
   await until(() => ez.runs.size === 1);
   const [admitted] = ez.runs.values();
   assert.equal(admitted.scope, 'telegram:-1001:12');
-  assert.equal(admitted.input.text, `Telegram group "Partner handoff" (-1001), topic 12, message ${admitted.input.context.telegram.messageId}, from Ana B @ana:\n@example_group_bot when did it enter BoldTrail?`);
+  assert.equal(admitted.input.text, `Telegram group "Partner handoff" (-1001), topic 12, message ${admitted.input.context.telegram.messageId}, from Ana B @ana:\n@example_group_bot when did it enter BoldTrail?\n\n(Your text replies in this run are posted here. To reply with a voice note instead: ez telegram send --voice --chat -1001 --topic 12 --reply-to ${admitted.input.context.telegram.messageId} --key NEW_KEY --text "...", and send no text reply.)`);
   assert.deepEqual(admitted.input.context.telegram.topicId, 12);
   Object.assign(admitted, {status: 'completed', messages: [{id: 'm1', text: 'It entered BoldTrail on Nov 15 at 6:18 am ET.'}]});
   await until(() => api.sent().length === 1);
@@ -277,12 +277,12 @@ test('a group message starts an agent run per topic and the reply is posted back
     message(undefined, {document: {file_id: 'doc-huge', file_name: 'deed.pdf', file_size: 20 * 1024 * 1024}, is_topic_message: true, message_thread_id: 12}));
   await until(() => ez.runs.size === 4);
   const [, photo, voice, huge] = [...ez.runs.values()].map(item => item.input);
-  assert.match(photo.text, /\n\[photo attached\] the lot$/);
+  assert.match(photo.text, /\n\[photo attached\] the lot\n\n\(Your text replies/);
   assert.equal(photo.attachment.name.startsWith('photo-'), true);
   assert.equal(Buffer.from(photo.attachment.data, 'base64').toString(), 'JPEGDATA');
-  assert.match(voice.text, /\n\[voice 4s, transcript\] call the owner back at noon$/);
+  assert.match(voice.text, /\n\[voice 4s, transcript\] call the owner back at noon\n\n\(Your text replies/);
   assert.equal(voice.attachment, undefined);
-  assert.match(huge.text, /\n\[document of 20.0 MB not passed on: over 10 MB\]$/);
+  assert.match(huge.text, /\n\[document of 20.0 MB not passed on: over 10 MB\]\n\n\(Your text replies/);
 });
 
 const fakeVoice = () => ({spoken: [], heard: [],
