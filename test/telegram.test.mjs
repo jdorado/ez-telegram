@@ -5,6 +5,7 @@ import {mkdtemp, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {Readable} from 'node:stream';
+import {createHash} from 'node:crypto';
 import {Store} from '../src/store.mjs';
 import {Transport} from '../src/transport.mjs';
 import {Provider} from '../src/provider.mjs';
@@ -205,6 +206,60 @@ test('a consumer reads after its acknowledged cursor, never backward or ahead', 
   await assert.rejects(main(['acknowledge', '--consumer', 'pa', '--cursor', '1'], {socketPath}), {code: 'CURSOR_MISMATCH'});
   await assert.rejects(main(['acknowledge', '--consumer', 'pa', '--cursor', '99'], {socketPath}), {code: 'CURSOR_AHEAD'});
   assert.deepEqual((await main(['inbox', '--after', '0', '--chat', '-1001', '--limit', '1'], {socketPath})).events.map(event => event.text), ['one']);
+});
+
+// An Ez application-channel stand-in: admits runs by requestId and returns the agent's messages.
+async function ezCore(t) {
+  const state = {runs: new Map(), requests: [], token: 'a'.repeat(43)};
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const chunk of request) body += chunk;
+    const reply = (status, payload) => { response.statusCode = status; response.end(JSON.stringify(payload)); };
+    if (request.headers.authorization !== `Bearer ${state.token}`) return reply(401, {error: 'unauthorized'});
+    state.requests.push({method: request.method, url: request.url, body: body ? JSON.parse(body) : undefined});
+    if (request.url === '/v1/registration') return reply(200, {bindingId: 'binding-1'});
+    if (request.method === 'POST' && request.url === '/v1/runs') {
+      const input = JSON.parse(body), id = `r_app_${createHash('sha256').update(input.requestId).digest('hex')}`;
+      if (!state.runs.has(id)) state.runs.set(id, {id, scope: input.scope, status: 'queued', messages: [], input});
+      return reply(202, state.runs.get(id));
+    }
+    const run = state.runs.get(request.url.replace('/v1/runs/', ''));
+    return run ? reply(200, run) : reply(404, {error: 'not found'});
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  state.url = `http://127.0.0.1:${server.address().port}`;
+  return state;
+}
+
+test('a group message starts an agent run per topic and the reply is posted back into the topic', async t => {
+  const api = await telegram(t), ez = await ezCore(t);
+  const directory = await mkdtemp(join(tmpdir(), 'ez-telegram-chan-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const service = await serve({directory, socketPath: join(directory, 's.sock'), pollTimeout: 0, idleMs: 10, channelMs: 10,
+    provider: connection => new Provider(connection.botToken, {base: api.base})});
+  t.after(() => service.close());
+  const run = (argv, stdin) => main(argv, {socketPath: service.socketPath, ...(stdin === undefined ? {} : {stdin: Readable.from([stdin])})});
+  await run(['init'], JSON.stringify({botToken: TOKEN}));
+  api.updates.push(message('before the channel'));
+  await until(async () => (await run(['status'])).head === 1);
+  await assert.rejects(run(['connect'], JSON.stringify({url: ez.url, token: 'b'.repeat(43), privateHttp: true})), {code: 'CORE_AUTH'});
+  await assert.rejects(run(['connect'], JSON.stringify({url: ez.url, token: ez.token})), {code: 'INVALID_INPUT'});
+  assert.deepEqual(await run(['connect'], JSON.stringify({url: ez.url, token: ez.token, privateHttp: true})), {connected: true, bindingId: 'binding-1', admitted: 1});
+  api.updates.push(message('@example_group_bot when did it enter BoldTrail?', {is_topic_message: true, message_thread_id: 12}));
+  await until(() => ez.runs.size === 1);
+  const [admitted] = ez.runs.values();
+  assert.equal(admitted.scope, 'telegram:-1001:12');
+  assert.equal(admitted.input.text, `Telegram group "Partner handoff" (-1001), topic 12, message ${admitted.input.context.telegram.messageId}, from Ana B @ana:\n@example_group_bot when did it enter BoldTrail?`);
+  assert.deepEqual(admitted.input.context.telegram.topicId, 12);
+  Object.assign(admitted, {status: 'completed', messages: [{id: 'm1', text: 'It entered BoldTrail on Nov 15 at 6:18 am ET.'}]});
+  await until(() => api.sent().length === 1);
+  assert.deepEqual(api.sent()[0].input, {chat_id: '-1001', text: 'It entered BoldTrail on Nov 15 at 6:18 am ET.', link_preview_options: {is_disabled: true},
+    message_thread_id: 12, reply_parameters: {message_id: admitted.input.context.telegram.messageId, allow_sending_without_reply: true}});
+  await until(async () => (await run(['status'])).channel.openRuns === 0);
+  await sleep(50);
+  assert.equal(api.sent().length, 1);
+  assert.equal(ez.requests.filter(request => request.method === 'POST' && request.url === '/v1/runs').length, 1);
+  assert.deepEqual((await run(['status'])).channel.runs, {completed: 1});
 });
 
 test('doctor reads the bot and warns about privacy mode and a webhook', async t => {
