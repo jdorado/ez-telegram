@@ -36,6 +36,10 @@ topic once; `operation --key KEY` returns its `providerTopicId` for later sends.
 topic (or of the group when it has no topic); `--chat ID --message ID` pins any message.
 It is silent unless `--notify`, needs the bot's Pin messages admin right (`doctor`
 shows `canPinMessages`), and its key and outcomes read like `send`.
+`delete --send-key SEND_KEY --key KEY` (or `--chat ID --message ID`) deletes a
+message for everyone. The bot may delete its own posts, and others' with the Delete
+messages admin right (`doctor` shows `canDeleteMessages`); Telegram allows it only
+within 48 hours of posting. Its key and outcomes read like `send`.
 Enabling Topics turns a group into a supergroup with a new id; `chats` shows the
 old entry's `migratedTo` and sends to the old id are refused.
 

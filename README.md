@@ -16,7 +16,7 @@ chats, channels, files or voice. No content becomes an instruction.
 2. In BotFather turn **Group Privacy** off for it (`/setprivacy` → Disable), or make
    it a group admin; otherwise it sees only commands, mentions and replies.
 3. Create the group, add the bot (as an admin for topics: allow *Manage topics* and
-   posting, plus *Pin messages* for `pin`), and write one message there. Enabling **Topics** converts a group to a
+   posting, plus *Pin messages* for `pin` and *Delete messages* for deleting others' messages), and write one message there. Enabling **Topics** converts a group to a
    supergroup under a new id.
 4. `ez telegram chats` shows the group id (a negative number); `ez telegram doctor`
    reports anything blocking.
@@ -39,6 +39,7 @@ ez telegram topic create --chat -1001234567890 --name "12 Example Street" --key 
 ez telegram operation --key thread-lead-1                       # providerTopicId
 ez telegram send --chat -1001234567890 --topic 901 --text-stdin --key post-lead-1-1 < note.txt
 ez telegram pin --send-key post-lead-1-1 --key pin-lead-1      # top of topic 901, silent
+ez telegram delete --send-key post-lead-1-1 --key delete-lead-1-1 # within 48 hours of posting
 ez telegram inbox --consumer pa --limit 20
 ez telegram acknowledge --consumer pa --cursor 17
 ```

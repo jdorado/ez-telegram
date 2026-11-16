@@ -44,7 +44,7 @@ async function telegram(t, {canRead = true} = {}) {
     }
     if (method === 'getChatMember') return ok(state.members[input.chat_id] ?? {status: 'member'});
     if (method === 'sendMessage') return ok({message_id: state.next++, chat: {id: Number(input.chat_id)}});
-    if (method === 'pinChatMessage') return ok(true);
+    if (method === 'pinChatMessage' || method === 'deleteMessage') return ok(true);
     if (method === 'createForumTopic') return ok({message_thread_id: 900 + state.requests.filter(r => r.method === method).length, name: input.name});
     return reply(404, {ok: false, error_code: 404, description: 'Not Found'});
   });
@@ -169,6 +169,21 @@ test('pin pins a sent message once per key, silently by default', async t => {
   assert.equal((await transport.pin({chat: '-1001', message: 56, key: 'pin-4'})).state, 'rejected');
 });
 
+test('delete removes a sent message once per key', async t => {
+  const {api, transport} = await fixture(t);
+  await known(api, transport, message('hello'));
+  const deletes = () => api.requests.filter(request => request.method === 'deleteMessage');
+  const sent = await transport.send({chat: '-1001', text: 'Alert', key: 'alert-1', topic: 12});
+  const gone = await transport.delete({'send-key': 'alert-1', key: 'delete-1'});
+  assert.deepEqual([gone.state, gone.deleted, gone.messageId], ['accepted', true, sent.providerMessageId]);
+  assert.deepEqual(deletes()[0].input, {chat_id: '-1001', message_id: sent.providerMessageId});
+  assert.deepEqual(await transport.delete({'send-key': 'alert-1', key: 'delete-1'}), gone);
+  assert.equal(deletes().length, 1);
+  api.failure = {method: 'deleteMessage', status: 400, body: {ok: false, error_code: 400, description: "Bad Request: message can't be deleted"}};
+  assert.equal((await transport.delete({chat: '-1001', message: 55, key: 'delete-2'})).state, 'rejected');
+  await assert.rejects(transport.delete({'send-key': 'missing', key: 'delete-3'}), {code: 'NOT_FOUND'});
+});
+
 test('a consumer reads after its acknowledged cursor, never backward or ahead', async t => {
   const api = await telegram(t);
   const directory = await mkdtemp(join(tmpdir(), 'ez-telegram-cur-'));
@@ -198,7 +213,7 @@ test('doctor reads the bot and warns about privacy mode and a webhook', async t 
   assert.equal(report.warnings.length, 2);
   api.webhook = ''; api.members['-1001'] = {status: 'administrator', can_manage_topics: true};
   const fixed = await transport.doctor();
-  assert.deepEqual([fixed.warnings, fixed.chats[0].canManageTopics, fixed.chats[0].canPinMessages], [[], true, false]);
+  assert.deepEqual([fixed.warnings, fixed.chats[0].canManageTopics, fixed.chats[0].canPinMessages, fixed.chats[0].canDeleteMessages], [[], true, false, false]);
   assert.equal(api.requests.every(request => ['getMe', 'getWebhookInfo', 'getUpdates', 'getChatMember'].includes(request.method)), true);
 });
 
@@ -222,6 +237,7 @@ test('the service answers the CLI and never shows the token', async t => {
   assert.equal((await run(['pin', '--send-key', 'm1', '--key', 'p1'])).pinned, true);
   api.failure = {method: 'pinChatMessage', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: message to pin not found'}};
   await assert.rejects(run(['pin', '--chat', '-1001', '--message', '9', '--key', 'p2']), {code: 'SEND_REJECTED', exitCode: 4});
+  assert.equal((await run(['delete', '--chat', '-1001', '--message', '9', '--key', 'd1'])).deleted, true);
   api.failure = {method: 'sendMessage', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: chat not found'}};
   await assert.rejects(run(['send', '--chat', '-1001', '--text', 'x', '--key', 'm2']),
     error => error.code === 'SEND_REJECTED' && error.exitCode === 4 && error.details.providerCode === 400 && error.details.reason === 'PROVIDER_REJECTED');
