@@ -11,7 +11,10 @@ export class Transport {
     this.now = options.now ?? Date.now;
     this.pollTimeout = options.pollTimeout ?? 25;
     this.provider = options.provider ?? new Provider(connection.botToken);
+    this.voice = options.voice ?? null;
   }
+  // The bytes of a captured file, for the channel to hand to the agent.
+  download(file) { return this.provider.download(file.id); }
   at() { return new Date(this.now()).toISOString(); }
   // One long poll. Updates stay at Telegram until a later poll confirms their offset, so the offset
   // moves only with the transaction that captured them.
@@ -20,7 +23,7 @@ export class Transport {
       const updates = (await this.provider.updates(this.store.meta('offset') || undefined, this.pollTimeout, signal)).filter(update => Number.isSafeInteger(update?.update_id));
       let captured = 0;
       if (updates.length) {
-        const items = updates.map(update => interpret(update)).filter(Boolean);
+        const items = updates.map(update => interpret(update, {dmAllow: this.store.meta('dmAllow') ?? []})).filter(Boolean);
         captured = this.store.ingest(items, Math.max(...updates.map(update => update.update_id)) + 1, this.at());
       }
       this.store.setMeta('lastPoll', {at: this.at(), error: null, captured});
@@ -53,8 +56,10 @@ export class Transport {
   }
   async send(args) {
     const payload = sendInput(args), {text, ...rest} = payload;
+    if (payload.voice && !this.voice) throw fail('VOICE_NOT_CONFIGURED', 'Configure a voice with voice-init before sending voice notes', 3);
+    // A voice note is the text spoken in the configured voice; the audio is rendered only when it is really sent.
     return this.act(payload, {...rest, textSha256: hash(text), textLength: text.length, providerMessageId: null}, args,
-      () => this.provider.sendMessage(payload), response => {
+      async () => payload.voice ? this.provider.sendVoice(payload, await this.voice.speak(text)) : this.provider.sendMessage(payload), response => {
         if (!Number.isSafeInteger(response?.message_id) || String(response?.chat?.id) !== payload.chat) throw fail('PROVIDER_RESPONSE', 'Telegram did not return a message in that chat', 5);
         return {providerMessageId: response.message_id};
       });

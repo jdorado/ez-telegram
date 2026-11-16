@@ -26,13 +26,17 @@ const message = (text, extra = {}, chat = group, from = ana) => ({update_id: uid
 
 // A Bot API stand-in over real HTTP, so the provider's own request building is what the tests exercise.
 async function telegram(t, {canRead = true} = {}) {
-  const state = {updates: [], requests: [], webhook: '', members: {}, failure: null, next: 100};
+  const state = {updates: [], requests: [], webhook: '', members: {}, failure: null, next: 100, files: {}};
   const server = createServer(async (request, response) => {
-    let body = ''; for await (const chunk of request) body += chunk;
-    const [, token, method] = request.url.match(/^\/bot([^/]+)\/(\w+)$/) ?? [];
+    const chunks = []; for await (const chunk of request) chunks.push(chunk);
+    const raw = Buffer.concat(chunks), body = raw.toString();
     const reply = (status, payload) => { response.statusCode = status; response.end(typeof payload === 'string' ? payload : JSON.stringify(payload)); };
+    const download = request.url.match(/^\/file\/bot([^/]+)\/(.+)$/);
+    if (download) return download[1] === TOKEN && state.files[download[2]] ? response.end(state.files[download[2]]) : reply(404, 'missing');
+    const [, token, method] = request.url.match(/^\/bot([^/]+)\/(\w+)$/) ?? [];
     if (token !== TOKEN) return reply(401, {ok: false, error_code: 401, description: 'Unauthorized'});
-    const input = body ? JSON.parse(body) : {};
+    const multipart = request.headers['content-type']?.startsWith('multipart/');
+    const input = multipart ? Object.fromEntries(await new Response(raw, {headers: {'content-type': request.headers['content-type']}}).formData()) : body ? JSON.parse(body) : {};
     state.requests.push({method, input});
     if (state.failure?.method === method) { const failure = state.failure; state.failure = null; return reply(failure.status, failure.body); }
     const ok = result => reply(200, {ok: true, result});
@@ -46,6 +50,8 @@ async function telegram(t, {canRead = true} = {}) {
     if (method === 'getChatMember') return ok(state.members[input.chat_id] ?? {status: 'member'});
     if (method === 'sendMessage') return ok({message_id: state.next++, chat: {id: Number(input.chat_id)}});
     if (method === 'pinChatMessage' || method === 'deleteMessage') return ok(true);
+    if (method === 'getFile') return ok({file_id: input.file_id, file_path: `files/${input.file_id}`});
+    if (method === 'sendVoice') return ok({message_id: state.next++, chat: {id: Number(input.chat_id)}, voice: {file_id: 'v'}});
     if (method === 'createForumTopic') return ok({message_thread_id: 900 + state.requests.filter(r => r.method === method).length, name: input.name});
     return reply(404, {ok: false, error_code: 404, description: 'Not Found'});
   });
@@ -235,11 +241,14 @@ test('a group message starts an agent run per topic and the reply is posted back
   const api = await telegram(t), ez = await ezCore(t);
   const directory = await mkdtemp(join(tmpdir(), 'ez-telegram-chan-'));
   t.after(() => rm(directory, {recursive: true, force: true}));
-  const service = await serve({directory, socketPath: join(directory, 's.sock'), pollTimeout: 0, idleMs: 10, channelMs: 10,
+  const heard = fakeVoice();
+  const service = await serve({directory, socketPath: join(directory, 's.sock'), pollTimeout: 0, idleMs: 10, channelMs: 10, voice: () => heard,
     provider: connection => new Provider(connection.botToken, {base: api.base})});
   t.after(() => service.close());
   const run = (argv, stdin) => main(argv, {socketPath: service.socketPath, ...(stdin === undefined ? {} : {stdin: Readable.from([stdin])})});
   await run(['init'], JSON.stringify({botToken: TOKEN}));
+  assert.deepEqual(await run(['voice-init'], JSON.stringify({elevenlabsApiKey: 'k'.repeat(32), voiceId: 'ySMglbMCoF5uHwNM8c9v'})), {voice: true, voiceId: 'ySMglbMCoF5uHwNM8c9v', model: 'eleven_multilingual_v2'});
+  assert.deepEqual(await run(['dms', '--allow', '42']), {dmAllow: ['42']});
   api.updates.push(message('before the channel'));
   await until(async () => (await run(['status'])).head === 1);
   await assert.rejects(run(['connect'], JSON.stringify({url: ez.url, token: 'b'.repeat(43), privateHttp: true})), {code: 'CORE_AUTH'});
@@ -260,6 +269,53 @@ test('a group message starts an agent run per topic and the reply is posted back
   assert.equal(api.sent().length, 1);
   assert.equal(ez.requests.filter(request => request.method === 'POST' && request.url === '/v1/runs').length, 1);
   assert.deepEqual((await run(['status'])).channel.runs, {completed: 1});
+  // A photo is attached to the run; a voice note arrives as its transcript; an oversized file becomes a note.
+  api.files['files/photo-big'] = Buffer.from('JPEGDATA');
+  api.files['files/voice-1'] = Buffer.from('OGGVOICE');
+  api.updates.push(message(undefined, {photo: [{file_id: 'photo-small'}, {file_id: 'photo-big', file_size: 8}], caption: 'the lot', is_topic_message: true, message_thread_id: 12}),
+    message(undefined, {voice: {file_id: 'voice-1', duration: 4, mime_type: 'audio/ogg'}, is_topic_message: true, message_thread_id: 12}),
+    message(undefined, {document: {file_id: 'doc-huge', file_name: 'deed.pdf', file_size: 20 * 1024 * 1024}, is_topic_message: true, message_thread_id: 12}));
+  await until(() => ez.runs.size === 4);
+  const [, photo, voice, huge] = [...ez.runs.values()].map(item => item.input);
+  assert.match(photo.text, /\n\[photo attached\] the lot$/);
+  assert.equal(photo.attachment.name.startsWith('photo-'), true);
+  assert.equal(Buffer.from(photo.attachment.data, 'base64').toString(), 'JPEGDATA');
+  assert.match(voice.text, /\n\[voice 4s, transcript\] call the owner back at noon$/);
+  assert.equal(voice.attachment, undefined);
+  assert.match(huge.text, /\n\[document of 20.0 MB not passed on: over 10 MB\]$/);
+});
+
+const fakeVoice = () => ({spoken: [], heard: [],
+  async speak(text) { this.spoken.push(text); return Buffer.concat([Buffer.from('OggS'), Buffer.from(text)]); },
+  async transcribe(bytes) { this.heard.push(bytes.toString()); return 'call the owner back at noon'; }});
+
+test('direct messages reach the journal only from allowed users', async t => {
+  const {api, store, transport} = await fixture(t);
+  const juan = {id: 42, type: 'private', first_name: 'Ana'};
+  api.updates.push(message('not yet allowed', {}, juan));
+  await transport.poll();
+  assert.equal(store.head(), 0);
+  store.setMeta('dmAllow', ['42']);
+  api.updates.push(message('echo test 2', {}, juan), message('stranger', {}, {id: 7, type: 'private'}, {id: 7, is_bot: false, first_name: 'X'}));
+  await transport.poll();
+  assert.deepEqual(store.inbox(0, 10).events.map(event => [event.chat, event.text]), [['42', 'echo test 2']]);
+  assert.equal(store.chat('42').type, 'private');
+  assert.equal((await transport.send({chat: '42', text: 'echo', key: 'dm-1'})).state, 'accepted');
+});
+
+test('send --voice speaks the text in the configured voice and posts a voice note once', async t => {
+  const {api, transport} = await fixture(t);
+  await known(api, transport, message('hello'));
+  await assert.rejects(transport.send({chat: '-1001', text: 'hi', key: 'v1', voice: true}), {code: 'VOICE_NOT_CONFIGURED'});
+  transport.voice = fakeVoice();
+  await assert.rejects(transport.send({chat: '-1001', text: '<b>x</b>', key: 'v1', voice: true, html: true}), {code: 'INVALID_INPUT'});
+  const sent = await transport.send({chat: '-1001', text: 'It entered BoldTrail yesterday.', key: 'v1', voice: true, topic: 12, 'reply-to': 55});
+  assert.deepEqual([sent.state, sent.voice], ['accepted', true]);
+  const request = api.requests.find(item => item.method === 'sendVoice');
+  assert.deepEqual([request.input.chat_id, request.input.message_thread_id, JSON.parse(request.input.reply_parameters).message_id], ['-1001', '12', 55]);
+  assert.equal(Buffer.from(await request.input.voice.arrayBuffer()).subarray(0, 4).toString(), 'OggS');
+  assert.deepEqual(await transport.send({chat: '-1001', text: 'It entered BoldTrail yesterday.', key: 'v1', voice: true, topic: 12, 'reply-to': 55}), sent);
+  assert.deepEqual(transport.voice.spoken, ['It entered BoldTrail yesterday.']);
 });
 
 test('doctor reads the bot and warns about privacy mode and a webhook', async t => {

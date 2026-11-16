@@ -12,8 +12,9 @@ export class Provider {
   async call(method, body = {}, {timeoutMs = 20000, signal} = {}) {
     let response, text;
     try {
-      response = await this.fetch(`${this.base}/bot${this.botToken}/${method}`, {method: 'POST', headers: {'content-type': 'application/json'},
-        body: JSON.stringify(body), signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])])});
+      const form = body instanceof FormData;
+      response = await this.fetch(`${this.base}/bot${this.botToken}/${method}`, {method: 'POST', ...(form ? {} : {headers: {'content-type': 'application/json'}}),
+        body: form ? body : JSON.stringify(body), signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])])});
       text = await response.text();
     } catch { throw fail('PROVIDER_UNAVAILABLE', 'Telegram did not answer', 2, {definitive: false}); }
     let data = null;
@@ -32,6 +33,16 @@ export class Provider {
     }
     throw fail('PROVIDER_UNAVAILABLE', 'Telegram did not answer', 2, {definitive: false});
   }
+  // Downloads a file Telegram holds for the bot (bots may download up to 20 MB).
+  async download(fileId) {
+    const file = await this.call('getFile', {file_id: fileId});
+    if (typeof file?.file_path !== 'string') throw fail('PROVIDER_RESPONSE', 'Telegram returned no file path');
+    let response;
+    try { response = await this.fetch(`${this.base}/file/bot${this.botToken}/${file.file_path}`, {signal: AbortSignal.timeout(60000)}); }
+    catch { throw fail('PROVIDER_UNAVAILABLE', 'Telegram did not answer', 2, {definitive: false}); }
+    if (!response.ok) throw fail('PROVIDER_REJECTED', 'Telegram refused the file download', 2, {definitive: true, providerCode: response.status});
+    return {bytes: Buffer.from(await response.arrayBuffer()), path: file.file_path};
+  }
   async me() {
     const me = await this.call('getMe');
     if (me?.is_bot !== true || !Number.isSafeInteger(me.id) || typeof me.username !== 'string') throw fail('PROVIDER_RESPONSE', 'Telegram returned an unexpected bot identity', 3);
@@ -47,6 +58,15 @@ export class Provider {
   sendMessage({chat, text, topic, replyTo, html}) {
     return this.call('sendMessage', {chat_id: chat, text, link_preview_options: {is_disabled: true}, ...(html ? {parse_mode: 'HTML'} : {}),
       ...(topic ? {message_thread_id: topic} : {}), ...(replyTo ? {reply_parameters: {message_id: replyTo, allow_sending_without_reply: true}} : {})});
+  }
+  // A voice note: Ogg Opus audio, shown in Telegram as a playable voice message.
+  async sendVoice({chat, topic, replyTo}, audio) {
+    const form = new FormData();
+    form.set('chat_id', chat);
+    form.set('voice', new Blob([audio], {type: 'audio/ogg'}), 'voice.ogg');
+    if (topic) form.set('message_thread_id', String(topic));
+    if (replyTo) form.set('reply_parameters', JSON.stringify({message_id: replyTo, allow_sending_without_reply: true}));
+    return this.call('sendVoice', form, {timeoutMs: 60000});
   }
   createTopic({chat, name}) { return this.call('createForumTopic', {chat_id: chat, name}); }
   // A message in a forum topic is pinned at the top of that topic.
