@@ -1,7 +1,7 @@
 import {Provider} from './provider.mjs';
 import {interpret} from './capture.mjs';
 import {fail, publicError} from './errors.mjs';
-import {sendInput, topicInput, pinInput} from './validation.mjs';
+import {sendInput, topicInput, pinInput, deleteInput} from './validation.mjs';
 import {hash} from './store.mjs';
 
 export class Transport {
@@ -73,6 +73,13 @@ export class Transport {
       return {pinned: true};
     });
   }
+  async delete(args) {
+    const payload = deleteInput(args, key => this.store.operation(key));
+    return this.act(payload, {...payload, deleted: false}, args, () => this.provider.deleteMessage(payload), response => {
+      if (response !== true) throw fail('PROVIDER_RESPONSE', 'Telegram did not confirm the deletion', 5);
+      return {deleted: true};
+    });
+  }
   // Read-only: what Telegram says about the bot and the chats it has seen.
   async doctor() {
     const me = await this.provider.me(), webhook = await this.provider.webhook();
@@ -81,7 +88,8 @@ export class Transport {
       const member = await this.provider.member(chat.id, me.id).catch(() => null);
       return {id: chat.id, type: chat.type, title: chat.title, isForum: chat.isForum, botStatus: member?.status === 'creator' ? 'administrator' : member?.status ?? chat.botStatus,
         ...(member ? {canManageTopics: member.status === 'creator' ? true : member.can_manage_topics ?? false,
-          canPinMessages: member.status === 'creator' ? true : member.can_pin_messages ?? false} : {})};
+          canPinMessages: member.status === 'creator' ? true : member.can_pin_messages ?? false,
+          canDeleteMessages: member.status === 'creator' ? true : member.can_delete_messages ?? false} : {})};
     }));
     const warnings = [];
     if (webhook?.url) warnings.push('WEBHOOK_ACTIVE: this bot has a webhook, so polling fails; use a bot nobody else serves');

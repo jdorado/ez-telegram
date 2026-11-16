@@ -51,4 +51,5 @@ export class Provider {
   createTopic({chat, name}) { return this.call('createForumTopic', {chat_id: chat, name}); }
   // A message in a forum topic is pinned at the top of that topic.
   pin({chat, messageId, notify}) { return this.call('pinChatMessage', {chat_id: chat, message_id: messageId, disable_notification: !notify}); }
+  deleteMessage({chat, messageId}) { return this.call('deleteMessage', {chat_id: chat, message_id: messageId}); }
 }
