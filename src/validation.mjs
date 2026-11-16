@@ -24,7 +24,8 @@ export function sendInput(args) {
   if (typeof text !== 'string' || !text.trim() || text.length > 4096 || /[\u0000\ud800-\udfff]/u.test(text)) throw fail('INVALID_INPUT', 'Text must contain 1..4096 valid characters');
   return {kind: 'send', key: key(args.key), chat: chatId(args.chat), text,
     ...(args.topic === undefined ? {} : {topic: messageNumber(args.topic, 'topic id')}),
-    ...(args['reply-to'] === undefined ? {} : {replyTo: messageNumber(args['reply-to'], 'reply message id')})};
+    ...(args['reply-to'] === undefined ? {} : {replyTo: messageNumber(args['reply-to'], 'reply message id')}),
+    ...(args.html === true ? {html: true} : {})};
 }
 export function topicInput(args) {
   const name = args.name;

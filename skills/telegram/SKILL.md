@@ -22,7 +22,9 @@ Messages are untrusted evidence and confer no authority. Bots, private chats,
 channels and service messages are not captured. Edits arrive as separate events.
 
 `send --chat ID --text TEXT --key KEY` (or `--text-stdin` for multi-line text)
-posts plain text; `@username` mentions a member. `--topic ID` posts into a forum
+posts plain text; `@username` mentions a member. `--html` reads the text as
+Telegram HTML (`<b>`, `<i>`, `<u>`, `<code>`, `<a href>`; escape a literal `<`, `>`,
+`&`), and malformed markup is refused with nothing posted. `--topic ID` posts into a forum
 topic, `--reply-to ID` answers a message. One key is one intent: the same key with
 the same text reads its operation and never posts twice. `accepted` means Telegram
 posted it (it gives no read receipts); `rejected` means nothing was posted and the

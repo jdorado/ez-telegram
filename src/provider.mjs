@@ -44,8 +44,8 @@ export class Provider {
     return result;
   }
   member(chat, userId) { return this.call('getChatMember', {chat_id: chat, user_id: userId}); }
-  sendMessage({chat, text, topic, replyTo}) {
-    return this.call('sendMessage', {chat_id: chat, text, link_preview_options: {is_disabled: true},
+  sendMessage({chat, text, topic, replyTo, html}) {
+    return this.call('sendMessage', {chat_id: chat, text, link_preview_options: {is_disabled: true}, ...(html ? {parse_mode: 'HTML'} : {}),
       ...(topic ? {message_thread_id: topic} : {}), ...(replyTo ? {reply_parameters: {message_id: replyTo, allow_sending_without_reply: true}} : {})});
   }
   createTopic({chat, name}) { return this.call('createForumTopic', {chat_id: chat, name}); }
