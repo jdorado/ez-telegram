@@ -30,7 +30,10 @@ export function runText(event, chat, media = {}) {
   const who = [event.from.name, event.from.username ? `@${event.from.username}` : null].filter(Boolean).join(' ') || `user ${event.from.id}`;
   const label = media.note ?? (event.type === 'text' ? '' : media.attached ? `[${event.type} attached]` : `[${event.type}]`);
   const body = [label, event.text].filter(Boolean).join(' ');
-  return `${where.join(', ')}, message ${event.messageId}${event.kind === 'edited' ? ' (edited)' : ''}, from ${who}:\n${body}`;
+  // The reply mechanism, which the agent cannot otherwise know: text replies come back here; a voice note is one command.
+  const place = `--chat ${event.chat}${event.topicId ? ` --topic ${event.topicId}` : ''} --reply-to ${event.messageId}`;
+  return `${where.join(', ')}, message ${event.messageId}${event.kind === 'edited' ? ' (edited)' : ''}, from ${who}:\n${body}\n\n` +
+    `(Your text replies in this run are posted here. To reply with a voice note instead: ez telegram send --voice ${place} --key NEW_KEY --text "...", and send no text reply.)`;
 }
 
 export class Channel {
