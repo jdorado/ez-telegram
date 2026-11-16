@@ -38,6 +38,7 @@ ez telegram doctor --json
 ez telegram chats
 ez telegram topic create --chat -1001234567890 --name "12 Example Street" --key thread-lead-1
 ez telegram operation --key thread-lead-1                       # providerTopicId
+ez telegram topic rename --chat -1001234567890 --topic 901 --name "🔴 Today 2pm · 12 Example Street" --key name-lead-1-1
 ez telegram send --chat -1001234567890 --topic 901 --text-stdin --key post-lead-1-1 < note.txt
 ez telegram send --chat -1001234567890 --topic 901 --html --text "<b>CALL 555-0100 · CODE 12</b>" --key post-lead-1-2
 ez telegram pin --send-key post-lead-1-1 --key pin-lead-1      # top of topic 901, silent

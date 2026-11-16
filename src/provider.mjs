@@ -69,6 +69,7 @@ export class Provider {
     return this.call('sendVoice', form, {timeoutMs: 60000});
   }
   createTopic({chat, name}) { return this.call('createForumTopic', {chat_id: chat, name}); }
+  renameTopic({chat, topic, name}) { return this.call('editForumTopic', {chat_id: chat, message_thread_id: topic, name}); }
   // A message in a forum topic is pinned at the top of that topic.
   pin({chat, messageId, notify}) { return this.call('pinChatMessage', {chat_id: chat, message_id: messageId, disable_notification: !notify}); }
   deleteMessage({chat, messageId}) { return this.call('deleteMessage', {chat_id: chat, message_id: messageId}); }
