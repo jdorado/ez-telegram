@@ -1,8 +1,8 @@
 import {createHash} from 'node:crypto';
 import {fail} from './errors.mjs';
 
-// The Ez application channel: every human message in a group the bot is in becomes an ordinary run of the
-// owner's agent, the way ez-slack treats the channels its bot is invited to. Each forum topic (or a group's
+// The Ez application channel: every human message in a group the bot is in (and a direct message from a user
+// the operator allowed) becomes an ordinary run of the owner's agent, the way ez-slack treats its channels. Each forum topic (or a group's
 // main thread) is one scope, so one native conversation. Adding the bot to a group is what trusts it.
 export const scopeFor = (chat, topic) => `telegram:${chat}:${topic ?? 'main'}`;
 const STATES = new Set(['queued', 'running', 'completed', 'failed', 'cancelled']);
@@ -19,12 +19,18 @@ export function core(input) {
   return {url: url.origin + '/', token: input.token, ...(input.privateHttp === true ? {privateHttp: true} : {})};
 }
 
+const MAX_FILE = 10 * 1024 * 1024; // what Ez stages for the agent
+const SPOKEN = new Set(['voice', 'audio']);
+
 // The run text says where the message came from, so the agent knows the group, topic and person.
-export function runText(event, chat) {
-  const where = [`Telegram group "${chat?.title ?? event.chatTitle ?? event.chat}" (${event.chat})`, event.topicId ? `topic ${event.topicId}` : 'main thread'];
+// A voice note arrives as its transcript; a photo or document is attached (`media` says which).
+export function runText(event, chat, media = {}) {
+  const where = chat?.type === 'private' ? ['Telegram direct message'] :
+    [`Telegram group "${chat?.title ?? event.chatTitle ?? event.chat}" (${event.chat})`, event.topicId ? `topic ${event.topicId}` : 'main thread'];
   const who = [event.from.name, event.from.username ? `@${event.from.username}` : null].filter(Boolean).join(' ') || `user ${event.from.id}`;
-  const body = event.text ?? `[${event.type}]`;
-  return `${where.join(', ')}, message ${event.messageId}${event.kind === 'edited' ? ' (edited)' : ''}, from ${who}:\n${event.type !== 'text' && event.text ? `[${event.type}] ` : ''}${body}`;
+  const label = media.note ?? (event.type === 'text' ? '' : media.attached ? `[${event.type} attached]` : `[${event.type}]`);
+  const body = [label, event.text].filter(Boolean).join(' ');
+  return `${where.join(', ')}, message ${event.messageId}${event.kind === 'edited' ? ' (edited)' : ''}, from ${who}:\n${body}`;
 }
 
 export class Channel {
@@ -32,6 +38,28 @@ export class Channel {
     this.store = store;
     this.connection = connection;
     this.fetch = options.fetch ?? globalThis.fetch;
+    this.files = options.files ?? null;
+    this.voice = options.voice ?? null;
+  }
+  // What a message's file becomes for the agent. A definite refusal (too large, unreadable, rejected) becomes a
+  // note so the message still reaches the agent; an outage throws and the message is retried on the next pass.
+  async media(event) {
+    const file = event.file, kind = event.type;
+    if (!file || !this.files || (event.kind === 'edited')) return {};
+    if (file.size !== null && file.size > MAX_FILE) return {note: `[${kind} of ${(file.size / 1048576).toFixed(1)} MB not passed on: over 10 MB]`};
+    let download;
+    try { download = await this.files(file); }
+    catch (error) { if (error.details?.definitive) return {note: `[${kind} could not be downloaded]`}; throw error; }
+    if (!download.bytes.length || download.bytes.length > MAX_FILE) return {note: `[${kind} not passed on: empty or over 10 MB]`};
+    const extension = download.path.match(/\.[A-Za-z0-9]{1,8}$/)?.[0] ?? '';
+    const name = file.name ?? `${kind}-${event.messageId}${extension}`;
+    if (SPOKEN.has(kind)) {
+      const length = file.duration ? ` ${file.duration}s` : '';
+      if (!this.voice) return {note: `[${kind}${length}, not transcribed: no voice configured]`};
+      try { return {note: `[${kind}${length}, transcript] ${await this.voice.transcribe(download.bytes, name) || '(no speech)'}`}; }
+      catch (error) { if (error.details?.definitive) return {note: `[${kind}${length} could not be transcribed]`}; throw error; }
+    }
+    return {attached: true, attachment: {name, data: download.bytes.toString('base64')}};
   }
   async call(path, body) {
     let response;
@@ -56,8 +84,9 @@ export class Channel {
       const {events} = this.store.inbox(after, 20);
       if (!events.length) return admitted;
       for (const event of events) {
-        const scope = scopeFor(event.chat, event.topicId);
-        const run = await this.call('/v1/runs', {requestId: `tg:${event.id}`, scope, text: runText(event, this.store.chat(event.chat)),
+        const scope = scopeFor(event.chat, event.topicId), media = await this.media(event);
+        const run = await this.call('/v1/runs', {requestId: `tg:${event.id}`, scope, text: runText(event, this.store.chat(event.chat), media),
+          ...(media.attachment ? {attachment: media.attachment} : {}),
           context: {telegram: {chat: event.chat, topicId: event.topicId, messageId: event.messageId, from: event.from}}});
         if (!RUN.test(run.id ?? '') || run.scope !== scope) throw fail('CORE_RESPONSE', 'Ez admitted a different run');
         this.store.openRun({runId: run.id, scope, chat: event.chat, topic: event.topicId, replyTo: event.messageId, sent: [], seq: event.seq});

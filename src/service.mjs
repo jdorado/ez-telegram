@@ -6,12 +6,13 @@ import {Store} from './store.mjs';
 import {Transport} from './transport.mjs';
 import {Provider} from './provider.mjs';
 import {Channel, core} from './channel.mjs';
-import {config, integer, key, chatId} from './validation.mjs';
+import {config, integer, key, chatId, voiceConfig} from './validation.mjs';
+import {Voice} from './voice.mjs';
 import {fail, publicError} from './errors.mjs';
 
 export async function serve(options = {}) {
   const directory = options.directory ?? '/state/telegram', socketPath = options.socketPath ?? '/plugins/telegram/service.sock';
-  const connectionFile = join(directory, 'connection.json'), coreFile = join(directory, 'core.json');
+  const connectionFile = join(directory, 'connection.json'), coreFile = join(directory, 'core.json'), voiceFile = join(directory, 'voice.json');
   await mkdir(directory, {recursive: true, mode: 0o700});
   // A held SQLite lock is released by the OS when the container dies, so no stale lock file exists.
   const writer = new DatabaseSync(join(directory, '.writer.sqlite'), {timeout: 0});
@@ -23,7 +24,11 @@ export async function serve(options = {}) {
     let transport, closed = false, initializing = false, abort = new AbortController(), inflight = null, loop;
     const active = new Set();
     const now = options.now ?? Date.now;
-    const make = connection => new Transport(store, connection, {now, pollTimeout: options.pollTimeout,
+    let voice = null;
+    const makeVoice = settings => options.voice ? options.voice(settings) : new Voice(settings);
+    try { voice = makeVoice(voiceConfig((({version, ...fields}) => fields)(JSON.parse(await readFile(voiceFile, 'utf8'))))); }
+    catch (error) { if (error.code !== 'ENOENT') throw error.exitCode ? error : fail('CORRUPT_STATE', 'Voice configuration is unreadable; preserve it and investigate'); }
+    const make = connection => new Transport(store, connection, {now, pollTimeout: options.pollTimeout, voice,
       ...(options.provider ? {provider: options.provider(connection)} : {})});
     const sleep = ms => new Promise(resolve => {
       const timer = setTimeout(resolve, ms);
@@ -37,7 +42,7 @@ export async function serve(options = {}) {
       if (error.code !== 'ENOENT') throw error.exitCode ? error : fail('CORRUPT_STATE', 'Configuration is unreadable; preserve it and investigate');
     }
     let channel = null;
-    const makeChannel = connection => new Channel(store, connection, {fetch: options.fetch});
+    const makeChannel = connection => new Channel(store, connection, {fetch: options.fetch, files: file => required().download(file), voice: {transcribe: (...args) => voice ? voice.transcribe(...args) : Promise.reject(fail('VOICE_NOT_CONFIGURED', 'No voice configured', 3, {definitive: true}))}});
     try { channel = makeChannel(core(JSON.parse(await readFile(coreFile, 'utf8')))); }
     catch (error) { if (error.code !== 'ENOENT') throw error.exitCode ? error : fail('CORRUPT_STATE', 'Ez connection is unreadable; preserve it and investigate'); }
     // Admit new messages to Ez and post the agent's replies, every couple of seconds.
@@ -69,7 +74,7 @@ export async function serve(options = {}) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw fail('INVALID_INPUT', 'Expected command arguments');
       if (initializing && !['health', 'status', 'inbox', 'operation'].includes(command)) throw fail('BUSY', 'Configuration is being updated');
       if (command === 'health') return {service: 'ready'};
-      if (command === 'status') return {configured: Boolean(transport), channelConnected: Boolean(channel), ...store.status()};
+      if (command === 'status') return {configured: Boolean(transport), channelConnected: Boolean(channel), voice: Boolean(voice), dmAllow: store.meta('dmAllow') ?? [], ...store.status()};
       if (command === 'init') {
         initializing = true; abort.abort(); await inflight?.catch(() => {});
         try {
@@ -93,6 +98,21 @@ export async function serve(options = {}) {
         await atomicPrivate(coreFile, connection);
         channel = candidate;
         return {connected: true, bindingId: registration.bindingId ?? null, admitted: store.meta('admitted')};
+      }
+      if (command === 'voice-init') {
+        const settings = voiceConfig(args.configuration), candidate = makeVoice(settings);
+        await candidate.speak('Ready.');
+        await atomicPrivate(voiceFile, settings);
+        voice = candidate;
+        if (transport) transport.voice = voice;
+        return {voice: true, voiceId: settings.voiceId, model: settings.model};
+      }
+      if (command === 'dms') {
+        const allowed = new Set(store.meta('dmAllow') ?? []);
+        if (args.allow !== undefined) allowed.add(String(integer(args.allow, 1, Number.MAX_SAFE_INTEGER, 'user id')));
+        if (args.remove !== undefined) allowed.delete(String(integer(args.remove, 1, Number.MAX_SAFE_INTEGER, 'user id')));
+        store.setMeta('dmAllow', [...allowed]);
+        return {dmAllow: [...allowed]};
       }
       if (command === 'inbox') {
         const consumer = args.consumer === undefined ? undefined : key(args.consumer);

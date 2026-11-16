@@ -52,5 +52,11 @@ What you send in that run (`ezenciel-agents-message`) is posted back into that
 topic as a reply. Answer there only what the group may see; the members are the
 people the owner chose to add the bot for.
 
+A photo or document someone sends is attached to your run; a voice note arrives as
+its transcript (`[voice 4s, transcript] ...`). `send --voice` speaks your text as a
+voice note in the configured voice (plain text, up to 2500 characters): answer a voice
+note with one when a spoken reply fits, and then send no text reply for it. Direct
+messages reach you only from users the operator allowed.
+
 The plugin holds Telegram mechanics and receipts only. Whom to post to, what to
 say and what a reply means stay with the agent.

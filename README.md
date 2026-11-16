@@ -8,7 +8,7 @@ ez-twilio and ez-whatsapp: a managed container long-polls Telegram, keeps a
 private journal, and the agent works through one CLI.
 
 Not here: running models, replies without the agent, business workflows, private
-chats, channels, files or voice.
+chats from users not allowed, channels, video.
 
 ## Set up the bot and the group
 
@@ -71,6 +71,19 @@ topic as a reply to the message, once per message key. **Adding the bot to a gro
 trusts every member there with the agent's owner authority**: use dedicated groups
 and add the bot only where that is intended. `status` shows `channel` progress
 (admitted cursor, open runs, last pass).
+
+## Files, voice and direct messages
+
+- **Photos and documents** (up to 10 MB) in a message are attached to the agent's run
+  (Ez stages them for the agent to open); larger files arrive as a note.
+- **Voice notes and audio** arrive as their transcript. **`send --voice`** posts the text
+  as a voice note in the configured voice. Both use ElevenLabs (speech-to-text
+  `scribe_v1`; text-to-speech straight to Ogg Opus, Telegram's voice format), set up once
+  by the operator: `ez telegram voice-init < /private/voice.json` with
+  `{"elevenlabsApiKey","voiceId","model"?}`.
+- **Direct messages** to the bot are ignored, except from user ids the operator allows
+  (`ez telegram dms --allow USER_ID`, `--remove`); an allowed user's DM is its own
+  conversation (`telegram:USER_ID:main`) and replies go back to that DM.
 
 ## Limits
 

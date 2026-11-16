@@ -21,11 +21,12 @@ export function config(input) {
 }
 export function sendInput(args) {
   const text = args.text;
+  if (args.voice === true && (args.html === true || typeof text !== 'string' || text.length > 2500)) throw fail('INVALID_INPUT', 'A voice note speaks plain text of at most 2500 characters');
   if (typeof text !== 'string' || !text.trim() || text.length > 4096 || /[\u0000\ud800-\udfff]/u.test(text)) throw fail('INVALID_INPUT', 'Text must contain 1..4096 valid characters');
   return {kind: 'send', key: key(args.key), chat: chatId(args.chat), text,
     ...(args.topic === undefined ? {} : {topic: messageNumber(args.topic, 'topic id')}),
     ...(args['reply-to'] === undefined ? {} : {replyTo: messageNumber(args['reply-to'], 'reply message id')}),
-    ...(args.html === true ? {html: true} : {})};
+    ...(args.html === true ? {html: true} : {}), ...(args.voice === true ? {voice: true} : {})};
 }
 export function topicInput(args) {
   const name = args.name;
@@ -47,3 +48,10 @@ function target(args, sent) {
 }
 export function pinInput(args, sent) { return {kind: 'pin', key: key(args.key), ...target(args, sent), notify: args.notify === true}; }
 export function deleteInput(args, sent) { return {kind: 'delete', key: key(args.key), ...target(args, sent)}; }
+export function voiceConfig(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(name => !['elevenlabsApiKey', 'voiceId', 'model'].includes(name))) throw fail('INVALID_INPUT', 'Invalid voice configuration fields');
+  if (typeof input.elevenlabsApiKey !== 'string' || !/^[A-Za-z0-9_-]{20,200}$/.test(input.elevenlabsApiKey)) throw fail('INVALID_INPUT', 'Supply the ElevenLabs key privately on stdin');
+  if (typeof input.voiceId !== 'string' || !/^[A-Za-z0-9]{10,40}$/.test(input.voiceId)) throw fail('INVALID_INPUT', 'Invalid ElevenLabs voice id');
+  if (input.model !== undefined && (typeof input.model !== 'string' || !/^[a-z0-9_]{3,60}$/.test(input.model))) throw fail('INVALID_INPUT', 'Invalid ElevenLabs model');
+  return {version: 1, elevenlabsApiKey: input.elevenlabsApiKey, voiceId: input.voiceId, model: input.model ?? 'eleven_multilingual_v2'};
+}
