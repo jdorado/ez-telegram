@@ -12,6 +12,7 @@ import {Provider} from '../src/provider.mjs';
 import {serve} from '../src/service.mjs';
 import {main} from '../src/cli.mjs';
 import {config} from '../src/validation.mjs';
+import {runText} from '../src/channel.mjs';
 
 const TOKEN = '123456789:AAFakeTokenForOfflineTestsOnly_0123456789abc';
 const group = {id: -1001, type: 'supergroup', title: 'Partner handoff', is_forum: true};
@@ -156,6 +157,17 @@ test('topic create makes one topic per key', async t => {
   assert.deepEqual(await transport.topic({chat: '-1001', name: '12 Example Street', key: 'pa-thread-1'}), topic);
   assert.equal(api.requests.filter(request => request.method === 'createForumTopic').length, 1);
   assert.equal((await transport.send({chat: '-1001', text: 'in topic', key: 'k', topic: topic.providerTopicId})).state, 'accepted');
+});
+
+test('a message in a topic the bot created carries its key and current name', async t => {
+  const {api, store, transport} = await fixture(t);
+  await known(api, transport, message('hello'));
+  const topic = await transport.topic({chat: '-1001', name: '12 Example Street', key: 'pa-topic-L1'});
+  await transport.topicRename({chat: '-1001', topic: topic.providerTopicId, name: '🔴 12 Example Street', key: 'name-1'});
+  await known(api, transport, message('comps?', {is_topic_message: true, message_thread_id: topic.providerTopicId}));
+  const event = store.inbox(0, 10).events.at(-1);
+  assert.deepEqual(event.topic, {key: 'pa-topic-L1', name: '🔴 12 Example Street'});
+  assert.match(runText(event, null), /topic 901 "🔴 12 Example Street", which you created under key pa-topic-L1/);
 });
 
 test('topic rename gives a topic a new name once per key', async t => {

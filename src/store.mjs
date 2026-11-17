@@ -69,7 +69,20 @@ export class Store {
     const rows = chat === undefined
       ? this.db.prepare('SELECT seq,value FROM event WHERE seq>? ORDER BY seq LIMIT ?').all(after, limit)
       : this.db.prepare('SELECT seq,value FROM event WHERE seq>? AND chat=? ORDER BY seq LIMIT ?').all(after, chat, limit);
-    return {events: rows.map(row => ({seq: Number(row.seq), ...JSON.parse(row.value)})), nextCursor: rows.length ? Number(rows.at(-1).seq) : after, head: this.head()};
+    const events = rows.map(row => {
+      const event = {seq: Number(row.seq), ...JSON.parse(row.value)}, topic = event.topicId ? this.topic(event.chat, event.topicId) : null;
+      return topic ? {...event, topic} : event;
+    });
+    return {events, nextCursor: rows.length ? Number(rows.at(-1).seq) : after, head: this.head()};
+  }
+  // A topic this bot created: the key it was created under (which names what the topic is for) and its current name.
+  topic(chat, id) {
+    const created = read(this.db.prepare(`SELECT value FROM operation WHERE state='accepted' AND json_extract(value,'$.kind')='topic'
+      AND json_extract(value,'$.chat')=? AND json_extract(value,'$.providerTopicId')=?`).get(chat, id));
+    if (!created) return null;
+    const renamed = read(this.db.prepare(`SELECT value FROM operation WHERE state='accepted' AND json_extract(value,'$.kind')='topic-rename'
+      AND json_extract(value,'$.chat')=? AND json_extract(value,'$.topic')=? ORDER BY json_extract(value,'$.updatedAt') DESC LIMIT 1`).get(chat, id));
+    return {key: created.key, name: renamed?.name ?? created.name};
   }
   consumer(id) { return Number(this.db.prepare('SELECT cursor FROM consumer WHERE id=?').get(id)?.cursor ?? 0); }
   acknowledge(id, cursor) {

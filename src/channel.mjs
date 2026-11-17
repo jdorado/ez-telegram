@@ -24,9 +24,11 @@ const SPOKEN = new Set(['voice', 'audio']);
 
 // The run text says where the message came from, so the agent knows the group, topic and person.
 // A voice note arrives as its transcript; a photo or document is attached (`media` says which).
+// A topic this bot created also gives its name and the key it was created under, so the agent knows what it is for.
 export function runText(event, chat, media = {}) {
+  const named = event.topic ? ` "${event.topic.name}", which you created under key ${event.topic.key}` : '';
   const where = chat?.type === 'private' ? ['Telegram direct message'] :
-    [`Telegram group "${chat?.title ?? event.chatTitle ?? event.chat}" (${event.chat})`, event.topicId ? `topic ${event.topicId}` : 'main thread'];
+    [`Telegram group "${chat?.title ?? event.chatTitle ?? event.chat}" (${event.chat})`, event.topicId ? `topic ${event.topicId}${named}` : 'main thread'];
   const who = [event.from.name, event.from.username ? `@${event.from.username}` : null].filter(Boolean).join(' ') || `user ${event.from.id}`;
   const label = media.note ?? (event.type === 'text' ? '' : media.attached ? `[${event.type} attached]` : `[${event.type}]`);
   const body = [label, event.text].filter(Boolean).join(' ');
