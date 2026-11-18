@@ -33,7 +33,7 @@ const SPOKEN = new Set(['voice', 'audio']);
 // A topic this bot created also gives its name and the key it was created under, so the agent knows what it is for.
 export function runText(event, chat, media = {}) {
   const named = event.topic ? ` "${event.topic.name}", which you created under key ${event.topic.key}` : '';
-  const where = chat?.type === 'private' ? ['Telegram direct message'] :
+  const where = chat?.type === 'private' ? ['Telegram direct message', ...(event.topicId ? [`topic ${event.topicId}${named}`] : [])] :
     [`Telegram group "${chat?.title ?? event.chatTitle ?? event.chat}" (${event.chat})`, event.topicId ? `topic ${event.topicId}${named}` : 'main thread'];
   const who = [event.from.name, event.from.username ? `@${event.from.username}` : null].filter(Boolean).join(' ') || `user ${event.from.id}`;
   const label = media.note ?? (event.type === 'text' ? '' : media.attached ? `[${event.type} attached]` : `[${event.type}]`);
@@ -126,7 +126,7 @@ export class Channel {
       const known = this.store.chat(chat);
       if (!known || known.migratedTo || ['left', 'kicked'].includes(known.botStatus)) continue;
       if (known.type === 'private') {
-        if (thread !== 'main' || !allowedDms.has(chat)) continue;
+        if (!allowedDms.has(chat)) continue;
       } else if (this.connection.directMessagesOnly) continue;
       for (const message of run.messages ?? []) {
         if (typeof message?.id !== 'string' || typeof message.text !== 'string' || !message.text.trim()) continue;
@@ -134,7 +134,7 @@ export class Channel {
         for (const [index, text] of parts.entries()) {
           const key = `run-${sha(`${run.id}:${message.id}:${index}`).slice(0, 40)}`;
           if (this.store.operation(key)) continue;
-          const receipt = await send({chat, text, key, ...(thread !== 'main' ? {topic: thread} : {})});
+          const receipt = await send({chat, text, key, ...(thread !== 'main' ? {topic: Number(thread)} : {})});
           if (receipt.state === 'accepted') posted++;
         }
       }

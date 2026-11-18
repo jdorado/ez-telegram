@@ -76,7 +76,7 @@ and add the bot only where that is intended. `status` shows `channel` progress
 To deliver scheduled text replies, add `"scheduledReplies":true` to the
 private connection JSON. The plugin reads the most recent 100 runs from that
 Ez application binding. Only schedules bound to this channel can deliver.
-Direct messages require the recipient on the DM allowlist. Scheduled sends use
+Private chats and their topics require the recipient on the DM allowlist. Scheduled sends use
 the same durable operation receipts as chat replies and post without a reply-to
 message. Check `status` for the latest sweep and `operation` for provider delivery.
 
