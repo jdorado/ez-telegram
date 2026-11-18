@@ -337,13 +337,16 @@ test('scheduled results post only to their authorized Telegram scope and keep on
   await connect();
   await sleep(50);
   assert.equal(api.sent().length, 0);
-  await connect({scheduledReplies: true});
+  await connect({scheduledReplies: true, directMessagesOnly: true});
+  api.updates.push(message('Group message cannot start a run on this binding'));
+  register(`r_schedule_${'e'.repeat(64)}`, 'telegram:-1001:main', 'Groups cannot receive scheduled replies on this binding');
   await until(() => api.sent().length === 1);
   assert.deepEqual(api.sent()[0].input, {chat_id: '42', text: 'Scheduled brief', link_preview_options: {is_disabled: true}});
   const key = `run-${createHash('sha256').update(`${scheduled}:m1:0`).digest('hex').slice(0, 40)}`;
   await until(async () => (await run(['operation', '--key', key])).state === 'accepted');
   await sleep(80);
   assert.equal(api.sent().length, 1);
+  assert.equal(ez.requests.filter(request => request.method === 'POST').length, 0);
 });
 
 const fakeVoice = () => ({spoken: [], heard: [],

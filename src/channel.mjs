@@ -12,15 +12,17 @@ const TELEGRAM_SCOPE = /^telegram:(-?[1-9]\d{0,15}):(main|[1-9]\d{0,15})$/;
 const sha = value => createHash('sha256').update(value).digest('hex');
 
 export function core(input) {
-  if (!input || typeof input !== 'object' || Object.keys(input).some(name => !['url', 'token', 'privateHttp', 'scheduledReplies'].includes(name))) throw fail('INVALID_INPUT', 'Invalid Ez connection fields');
+  if (!input || typeof input !== 'object' || Object.keys(input).some(name => !['url', 'token', 'privateHttp', 'scheduledReplies', 'directMessagesOnly'].includes(name))) throw fail('INVALID_INPUT', 'Invalid Ez connection fields');
   let url;
   try { url = new URL(input.url); } catch { throw fail('INVALID_INPUT', 'Invalid Ez url'); }
   if (url.username || url.password || url.pathname !== '/' || url.search || url.hash ||
     !(url.protocol === 'https:' || (url.protocol === 'http:' && input.privateHttp === true))) throw fail('INVALID_INPUT', 'Use HTTPS or an explicitly trusted private Ez network');
   if (typeof input.token !== 'string' || !/^[A-Za-z0-9_-]{43,200}$/.test(input.token)) throw fail('INVALID_INPUT', 'Invalid Ez credential');
   if (input.scheduledReplies !== undefined && typeof input.scheduledReplies !== 'boolean') throw fail('INVALID_INPUT', 'scheduledReplies must be boolean');
+  if (input.directMessagesOnly !== undefined && typeof input.directMessagesOnly !== 'boolean') throw fail('INVALID_INPUT', 'directMessagesOnly must be boolean');
   return {url: url.origin + '/', token: input.token, ...(input.privateHttp === true ? {privateHttp: true} : {}),
-    ...(input.scheduledReplies === true ? {scheduledReplies: true} : {})};
+    ...(input.scheduledReplies === true ? {scheduledReplies: true} : {}),
+    ...(input.directMessagesOnly === true ? {directMessagesOnly: true} : {})};
 }
 
 const MAX_FILE = 10 * 1024 * 1024; // what Ez stages for the agent
@@ -93,8 +95,13 @@ export class Channel {
       const {events} = this.store.inbox(after, 20);
       if (!events.length) return admitted;
       for (const event of events) {
+        const chat = this.store.chat(event.chat);
+        if (this.connection.directMessagesOnly && chat?.type !== 'private') {
+          this.store.setMeta('admitted', event.seq);
+          continue;
+        }
         const scope = scopeFor(event.chat, event.topicId), media = await this.media(event);
-        const run = await this.call('/v1/runs', {requestId: `tg:${event.id}`, scope, text: runText(event, this.store.chat(event.chat), media),
+        const run = await this.call('/v1/runs', {requestId: `tg:${event.id}`, scope, text: runText(event, chat, media),
           ...(media.attachment ? {attachment: media.attachment} : {}),
           context: {telegram: {chat: event.chat, topicId: event.topicId, messageId: event.messageId, from: event.from}}});
         if (!RUN.test(run.id ?? '') || run.scope !== scope) throw fail('CORE_RESPONSE', 'Ez admitted a different run');
@@ -118,7 +125,9 @@ export class Channel {
       const [, chat, thread] = destination;
       const known = this.store.chat(chat);
       if (!known || known.migratedTo || ['left', 'kicked'].includes(known.botStatus)) continue;
-      if (known.type === 'private' && (thread !== 'main' || !allowedDms.has(chat))) continue;
+      if (known.type === 'private') {
+        if (thread !== 'main' || !allowedDms.has(chat)) continue;
+      } else if (this.connection.directMessagesOnly) continue;
       for (const message of run.messages ?? []) {
         if (typeof message?.id !== 'string' || typeof message.text !== 'string' || !message.text.trim()) continue;
         const parts = message.text.match(/[\s\S]{1,4000}/g);

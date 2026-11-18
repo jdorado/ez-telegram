@@ -92,6 +92,8 @@ message. Check `status` for the latest sweep and `operation` for provider delive
 - **Direct messages** to the bot are ignored, except from user ids the operator allows
   (`ez telegram dms --allow USER_ID`, `--remove`); an allowed user's DM is its own
   conversation (`telegram:USER_ID:main`) and replies go back to that DM.
+  Use `"directMessagesOnly":true` in the private connection JSON to keep groups
+  from starting runs or receiving scheduled replies on this binding.
 
 ## Limits
 
