@@ -117,6 +117,6 @@ export class Store {
       chatCount: Number(this.db.prepare('SELECT count(*) AS n FROM chat').get().n), operations: states,
       channel: {admitted: this.meta('admitted'), openRuns: Number(this.db.prepare('SELECT count(*) AS n FROM run WHERE closed IS NULL').get().n),
         runs: Object.fromEntries(this.db.prepare('SELECT closed,count(*) AS n FROM run WHERE closed IS NOT NULL GROUP BY closed').all().map(row => [row.closed, Number(row.n)])),
-        lastPass: this.meta('channelPass')}};
+        lastPass: this.meta('channelPass'), scheduledPass: this.meta('scheduledPass')}};
   }
 }

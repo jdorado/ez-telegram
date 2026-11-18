@@ -47,11 +47,23 @@ export async function serve(options = {}) {
     catch (error) { if (error.code !== 'ENOENT') throw error.exitCode ? error : fail('CORRUPT_STATE', 'Ez connection is unreadable; preserve it and investigate'); }
     // Admit new messages to Ez and post the agent's replies, every couple of seconds.
     async function pump() {
+      let nextScheduledSweep = 0;
       while (!closed) {
         if (channel && transport && !initializing) {
           try {
-            const admitted = await channel.admit(), posted = await channel.deliver(args => transport.send(args));
+            const send = args => transport.send(args);
+            const admitted = await channel.admit();
+            const posted = await channel.deliver(send);
             store.setMeta('channelPass', {at: new Date(now()).toISOString(), error: null, admitted, posted});
+            if (channel.connection.scheduledReplies && now() >= nextScheduledSweep) {
+              nextScheduledSweep = now() + (options.scheduledSweepMs ?? 15000);
+              try {
+                const scheduledPosted = await channel.deliverScheduled(send);
+                store.setMeta('scheduledPass', {at: new Date(now()).toISOString(), error: null, posted: scheduledPosted});
+              } catch (error) {
+                store.setMeta('scheduledPass', {at: new Date(now()).toISOString(), error: publicError(error).code});
+              }
+            }
           } catch (error) { if (!closed) store.setMeta('channelPass', {at: new Date(now()).toISOString(), error: publicError(error).code}); }
         }
         await sleep(options.channelMs ?? 2000);

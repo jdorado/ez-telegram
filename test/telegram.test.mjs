@@ -257,6 +257,7 @@ async function ezCore(t) {
       if (!state.runs.has(id)) state.runs.set(id, {id, scope: input.scope, status: 'queued', messages: [], input});
       return reply(202, state.runs.get(id));
     }
+    if (request.method === 'GET' && request.url === '/v1/runs') return reply(200, {runs: [...state.runs.values()]});
     const run = state.runs.get(request.url.replace('/v1/runs/', ''));
     return run ? reply(200, run) : reply(404, {error: 'not found'});
   });
@@ -312,6 +313,37 @@ test('a group message starts an agent run per topic and the reply is posted back
   assert.match(voice.text, /\n\[voice 4s, transcript\] call the owner back at noon\n\n\(Your text replies/);
   assert.equal(voice.attachment, undefined);
   assert.match(huge.text, /\n\[document of 20.0 MB not passed on: over 10 MB\]\n\n\(Your text replies/);
+});
+
+test('scheduled results post only to their authorized Telegram scope and keep one receipt per send', async t => {
+  const api = await telegram(t), ez = await ezCore(t);
+  const directory = await mkdtemp(join(tmpdir(), 'ez-telegram-scheduled-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const service = await serve({directory, socketPath: join(directory, 's.sock'), pollTimeout: 0, idleMs: 10,
+    channelMs: 10, scheduledSweepMs: 20, provider: connection => new Provider(connection.botToken, {base: api.base})});
+  t.after(() => service.close());
+  const run = (argv, stdin) => main(argv, {socketPath: service.socketPath, ...(stdin === undefined ? {} : {stdin: Readable.from([stdin])})});
+  await run(['init'], JSON.stringify({botToken: TOKEN}));
+  await run(['dms', '--allow', '42']);
+  api.updates.push(message('Known direct chat', {}, {id: 42, type: 'private'}));
+  await until(async () => (await run(['status'])).head === 1);
+  const connect = options => run(['connect'], JSON.stringify({url: ez.url, token: ez.token, privateHttp: true, ...options}));
+  const register = (id, scope, text) => ez.runs.set(id, {id, scope, status: 'completed', messages: [{id: 'm1', text}]});
+  const scheduled = `r_schedule_${'a'.repeat(64)}`;
+  register(scheduled, 'telegram:42:main', 'Scheduled brief');
+  register(`r_schedule_${'b'.repeat(64)}`, 'telegram:43:main', 'Disallowed recipient');
+  register(`r_schedule_${'c'.repeat(64)}`, 'slack:team:channel', 'Different channel');
+  register(`r_app_${'d'.repeat(64)}`, 'telegram:42:main', 'Foreground result without an admitted message');
+  await connect();
+  await sleep(50);
+  assert.equal(api.sent().length, 0);
+  await connect({scheduledReplies: true});
+  await until(() => api.sent().length === 1);
+  assert.deepEqual(api.sent()[0].input, {chat_id: '42', text: 'Scheduled brief', link_preview_options: {is_disabled: true}});
+  const key = `run-${createHash('sha256').update(`${scheduled}:m1:0`).digest('hex').slice(0, 40)}`;
+  await until(async () => (await run(['operation', '--key', key])).state === 'accepted');
+  await sleep(80);
+  assert.equal(api.sent().length, 1);
 });
 
 const fakeVoice = () => ({spoken: [], heard: [],

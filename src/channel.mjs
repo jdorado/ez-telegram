@@ -7,16 +7,20 @@ import {fail} from './errors.mjs';
 export const scopeFor = (chat, topic) => `telegram:${chat}:${topic ?? 'main'}`;
 const STATES = new Set(['queued', 'running', 'completed', 'failed', 'cancelled']);
 const RUN = /^r_app_[a-f0-9]{64}$/;
+const SCHEDULED_RUN = /^r_schedule_(?:manual_)?[a-f0-9]{64}$/;
+const TELEGRAM_SCOPE = /^telegram:(-?[1-9]\d{0,15}):(main|[1-9]\d{0,15})$/;
 const sha = value => createHash('sha256').update(value).digest('hex');
 
 export function core(input) {
-  if (!input || typeof input !== 'object' || Object.keys(input).some(name => !['url', 'token', 'privateHttp'].includes(name))) throw fail('INVALID_INPUT', 'Invalid Ez connection fields');
+  if (!input || typeof input !== 'object' || Object.keys(input).some(name => !['url', 'token', 'privateHttp', 'scheduledReplies'].includes(name))) throw fail('INVALID_INPUT', 'Invalid Ez connection fields');
   let url;
   try { url = new URL(input.url); } catch { throw fail('INVALID_INPUT', 'Invalid Ez url'); }
   if (url.username || url.password || url.pathname !== '/' || url.search || url.hash ||
     !(url.protocol === 'https:' || (url.protocol === 'http:' && input.privateHttp === true))) throw fail('INVALID_INPUT', 'Use HTTPS or an explicitly trusted private Ez network');
   if (typeof input.token !== 'string' || !/^[A-Za-z0-9_-]{43,200}$/.test(input.token)) throw fail('INVALID_INPUT', 'Invalid Ez credential');
-  return {url: url.origin + '/', token: input.token, ...(input.privateHttp === true ? {privateHttp: true} : {})};
+  if (input.scheduledReplies !== undefined && typeof input.scheduledReplies !== 'boolean') throw fail('INVALID_INPUT', 'scheduledReplies must be boolean');
+  return {url: url.origin + '/', token: input.token, ...(input.privateHttp === true ? {privateHttp: true} : {}),
+    ...(input.scheduledReplies === true ? {scheduledReplies: true} : {})};
 }
 
 const MAX_FILE = 10 * 1024 * 1024; // what Ez stages for the agent
@@ -99,6 +103,34 @@ export class Channel {
         admitted++;
       }
     }
+  }
+  // Scheduled runs already carry a destination in Ez. They did not originate from a Telegram update.
+  async deliverScheduled(send) {
+    if (!this.connection.scheduledReplies) return 0;
+    const {runs} = await this.call('/v1/runs');
+    if (!Array.isArray(runs)) throw fail('CORE_RESPONSE', 'Invalid Ez run list');
+    const allowedDms = new Set(this.store.meta('dmAllow') ?? []);
+    let posted = 0;
+    for (const run of runs) {
+      if (!SCHEDULED_RUN.test(run?.id ?? '') || !STATES.has(run.status)) continue;
+      const destination = TELEGRAM_SCOPE.exec(run.scope ?? '');
+      if (!destination) continue;
+      const [, chat, thread] = destination;
+      const known = this.store.chat(chat);
+      if (!known || known.migratedTo || ['left', 'kicked'].includes(known.botStatus)) continue;
+      if (known.type === 'private' && (thread !== 'main' || !allowedDms.has(chat))) continue;
+      for (const message of run.messages ?? []) {
+        if (typeof message?.id !== 'string' || typeof message.text !== 'string' || !message.text.trim()) continue;
+        const parts = message.text.match(/[\s\S]{1,4000}/g);
+        for (const [index, text] of parts.entries()) {
+          const key = `run-${sha(`${run.id}:${message.id}:${index}`).slice(0, 40)}`;
+          if (this.store.operation(key)) continue;
+          const receipt = await send({chat, text, key, ...(thread !== 'main' ? {topic: thread} : {})});
+          if (receipt.state === 'accepted') posted++;
+        }
+      }
+    }
+    return posted;
   }
   // Post each new message of an open run into its topic, as a reply to the message that started it.
   // A key per message posts it once; an uncertain send stays uncertain and is never retried.
