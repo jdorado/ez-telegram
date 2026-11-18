@@ -39,6 +39,9 @@ topic once; `operation --key KEY` returns its `providerTopicId` for later sends.
 `topic rename --chat ID --topic TOPIC_ID --name NAME --key KEY` changes the name the
 group's topic list shows, so a mark at its front (a red circle for one that needs someone
 today) is seen without opening the topic; each new name is its own key.
+`topic delete --chat ID --topic TOPIC_ID --key KEY` removes a topic and every message
+in it, for everyone, and cannot be undone; it needs the Delete messages admin right
+(`doctor` shows `canDeleteMessages`). Its key and outcomes read like `send`.
 `pin --send-key SEND_KEY --key KEY` pins a message the bot posted at the top of its
 topic (or of the group when it has no topic); `--chat ID --message ID` pins any message.
 It is silent unless `--notify`, needs the bot's Pin messages admin right (`doctor`

@@ -38,6 +38,7 @@ export function topicRenameInput(args) {
   const {name} = topicInput(args);
   return {kind: 'topic-rename', key: key(args.key), chat: chatId(args.chat), topic: messageNumber(args.topic, 'topic id'), name};
 }
+export function topicDeleteInput(args) { return {kind: 'topic-delete', key: key(args.key), chat: chatId(args.chat), topic: messageNumber(args.topic, 'topic id')}; }
 // A message is named by the send key the bot posted it under, or by its chat and id.
 function target(args, sent) {
   const chat = args.chat === undefined ? undefined : chatId(args.chat);

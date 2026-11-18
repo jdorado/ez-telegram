@@ -132,6 +132,7 @@ export async function serve(options = {}) {
       if (command === 'send') return current.send(args);
       if (command === 'topic') return current.topic(args);
       if (command === 'topic-rename') return current.topicRename(args);
+      if (command === 'topic-delete') return current.topicDelete(args);
       if (command === 'pin') return current.pin(args);
       if (command === 'delete') return current.delete(args);
       throw fail('INVALID_INPUT', 'Unknown command; read --help');

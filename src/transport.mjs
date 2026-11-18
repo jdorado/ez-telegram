@@ -1,7 +1,7 @@
 import {Provider} from './provider.mjs';
 import {interpret} from './capture.mjs';
 import {fail, publicError} from './errors.mjs';
-import {sendInput, topicInput, topicRenameInput, pinInput, deleteInput} from './validation.mjs';
+import {sendInput, topicInput, topicRenameInput, topicDeleteInput, pinInput, deleteInput} from './validation.mjs';
 import {hash} from './store.mjs';
 
 export class Transport {
@@ -76,6 +76,13 @@ export class Transport {
     return this.act(payload, {...payload, renamed: false}, args, () => this.provider.renameTopic(payload), response => {
       if (response !== true) throw fail('PROVIDER_RESPONSE', 'Telegram did not confirm the new topic name', 5);
       return {renamed: true};
+    });
+  }
+  async topicDelete(args) {
+    const payload = topicDeleteInput(args);
+    return this.act(payload, {...payload, deleted: false}, args, () => this.provider.deleteTopic(payload), response => {
+      if (response !== true) throw fail('PROVIDER_RESPONSE', 'Telegram did not confirm the topic deletion', 5);
+      return {deleted: true};
     });
   }
   async pin(args) {

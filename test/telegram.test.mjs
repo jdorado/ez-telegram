@@ -50,7 +50,7 @@ async function telegram(t, {canRead = true} = {}) {
     }
     if (method === 'getChatMember') return ok(state.members[input.chat_id] ?? {status: 'member'});
     if (method === 'sendMessage') return ok({message_id: state.next++, chat: {id: Number(input.chat_id)}});
-    if (method === 'pinChatMessage' || method === 'deleteMessage' || method === 'editForumTopic') return ok(true);
+    if (method === 'pinChatMessage' || method === 'deleteMessage' || method === 'editForumTopic' || method === 'deleteForumTopic') return ok(true);
     if (method === 'getFile') return ok({file_id: input.file_id, file_path: `files/${input.file_id}`});
     if (method === 'sendVoice') return ok({message_id: state.next++, chat: {id: Number(input.chat_id)}, voice: {file_id: 'v'}});
     if (method === 'createForumTopic') return ok({message_thread_id: 900 + state.requests.filter(r => r.method === method).length, name: input.name});
@@ -185,6 +185,22 @@ test('topic rename gives a topic a new name once per key', async t => {
   await assert.rejects(transport.topicRename({...args, key: 'name-2', name: ''}), {code: 'INVALID_INPUT'});
   api.failure = {method: 'editForumTopic', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: TOPIC_NOT_MODIFIED'}};
   assert.equal((await transport.topicRename({...args, key: 'name-3'})).state, 'rejected');
+});
+
+test('topic delete removes a topic once per key', async t => {
+  const {api, transport} = await fixture(t);
+  await known(api, transport, message('hello'));
+  const args = {chat: '-1001', topic: 901, key: 'drop-1'};
+  assert.deepEqual(await transport.topicDelete({...args, preview: true}),
+    {preview: true, payload: {kind: 'topic-delete', key: 'drop-1', chat: '-1001', topic: 901}});
+  const gone = await transport.topicDelete(args);
+  assert.deepEqual([gone.state, gone.deleted, gone.chat, gone.topic], ['accepted', true, '-1001', 901]);
+  assert.deepEqual(await transport.topicDelete(args), gone);
+  assert.deepEqual(api.requests.filter(request => request.method === 'deleteForumTopic').map(request => request.input),
+    [{chat_id: '-1001', message_thread_id: 901}]);
+  await assert.rejects(transport.topicDelete({...args, key: 'drop-2', topic: undefined}), {code: 'INVALID_INPUT'});
+  api.failure = {method: 'deleteForumTopic', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: TOPIC_ID_INVALID'}};
+  assert.equal((await transport.topicDelete({...args, key: 'drop-3'})).state, 'rejected');
 });
 
 test('pin pins a sent message once per key, silently by default', async t => {
@@ -382,6 +398,7 @@ test('the service answers the CLI and never shows the token', async t => {
   api.failure = {method: 'pinChatMessage', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: message to pin not found'}};
   await assert.rejects(run(['pin', '--chat', '-1001', '--message', '9', '--key', 'p2']), {code: 'SEND_REJECTED', exitCode: 4});
   assert.equal((await run(['delete', '--chat', '-1001', '--message', '9', '--key', 'd1'])).deleted, true);
+  assert.equal((await run(['topic', 'delete', '--chat', '-1001', '--topic', '901', '--key', 'td1'])).deleted, true);
   api.failure = {method: 'sendMessage', status: 400, body: {ok: false, error_code: 400, description: 'Bad Request: chat not found'}};
   await assert.rejects(run(['send', '--chat', '-1001', '--text', 'x', '--key', 'm2']),
     error => error.code === 'SEND_REJECTED' && error.exitCode === 4 && error.details.providerCode === 400 && error.details.reason === 'PROVIDER_REJECTED');
