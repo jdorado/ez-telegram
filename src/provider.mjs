@@ -72,5 +72,6 @@ export class Provider {
   renameTopic({chat, topic, name}) { return this.call('editForumTopic', {chat_id: chat, message_thread_id: topic, name}); }
   // A message in a forum topic is pinned at the top of that topic.
   pin({chat, messageId, notify}) { return this.call('pinChatMessage', {chat_id: chat, message_id: messageId, disable_notification: !notify}); }
+  deleteTopic({chat, topic}) { return this.call('deleteForumTopic', {chat_id: chat, message_thread_id: topic}); }
   deleteMessage({chat, messageId}) { return this.call('deleteMessage', {chat_id: chat, message_id: messageId}); }
 }
