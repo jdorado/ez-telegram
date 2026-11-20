@@ -170,6 +170,17 @@ test('a message in a topic the bot created carries its key and current name', as
   assert.match(runText(event, null), /topic 901 "🔴 12 Example Street", which you created under key pa-topic-L1/);
 });
 
+test('a message the bot answered carries its replies, whatever key answered it', async t => {
+  const {api, store, transport} = await fixture(t);
+  await known(api, transport, message('has she called back?'));
+  const asked = store.inbox(0, 10).events.at(-1);
+  assert.equal(asked.replies, undefined);
+  const answer = await transport.send({chat: '-1001', text: 'No call yet.', key: 'run-1', 'reply-to': asked.messageId});
+  await transport.send({chat: '-1001', text: 'unrelated', key: 'other'});
+  const replies = store.inbox(0, 10).events.at(-1).replies;
+  assert.deepEqual(replies.map(reply => [reply.key, reply.messageId]), [['run-1', answer.providerMessageId]]);
+});
+
 test('topic rename gives a topic a new name once per key', async t => {
   const {api, transport} = await fixture(t);
   await known(api, transport, message('hello'));

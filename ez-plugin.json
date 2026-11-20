@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "telegram",
-  "version": "0.1.0-beta.11",
+  "version": "0.1.0-beta.12",
   "description": "Telegram groups as an Ez channel: members' messages wake the agent per topic; post, pin, delete with receipts",
   "example": "telegram inbox --consumer pa --limit 20",
   "commands": {
