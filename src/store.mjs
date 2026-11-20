@@ -71,9 +71,16 @@ export class Store {
       : this.db.prepare('SELECT seq,value FROM event WHERE seq>? AND chat=? ORDER BY seq LIMIT ?').all(after, chat, limit);
     const events = rows.map(row => {
       const event = {seq: Number(row.seq), ...JSON.parse(row.value)}, topic = event.topicId ? this.topic(event.chat, event.topicId) : null;
-      return topic ? {...event, topic} : event;
+      const replies = this.replies(event.chat, event.messageId);
+      return {...event, ...(topic ? {topic} : {}), ...(replies.length ? {replies} : {})};
     });
     return {events, nextCursor: rows.length ? Number(rows.at(-1).seq) : after, head: this.head()};
+  }
+  // The bot's posted answers to one message, from any run or key, so a reader sees it was already answered.
+  replies(chat, messageId) {
+    return this.db.prepare(`SELECT value FROM operation WHERE state='accepted' AND json_extract(value,'$.kind')='send'
+      AND json_extract(value,'$.chat')=? AND json_extract(value,'$.replyTo')=? ORDER BY json_extract(value,'$.createdAt')`).all(chat, messageId)
+      .map(row => { const op = JSON.parse(row.value); return {key: op.key, messageId: op.providerMessageId, at: op.updatedAt}; });
   }
   // A topic this bot created: the key it was created under (which names what the topic is for) and its current name.
   topic(chat, id) {
